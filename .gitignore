@@ -7,3 +7,4 @@ path/
 saved_runs/
 .ipynb_checkpoints/
 .DS_Store
+generators/

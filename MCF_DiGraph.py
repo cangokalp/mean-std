@@ -25,6 +25,9 @@ class MCF_DiGraph:
         self.xicost = None
         self.mu_scalar = 1
         self.lambar = lambar
+        self.vartop = None
+        self.mutop = None
+
 
     def reset(self):
         self.set_flow_attributes(self.initial_flow)
@@ -85,84 +88,90 @@ class MCF_DiGraph:
     #     except:
     #         pass
 
-    def find_feasible_flow(self, d_top, mu_top, var_top):
+    def find_feasible_flow(self):
         """Establish a feasible flow
         """
-        # solve max flow problem
-
-        G_MaxFlow = self.nxg.copy()
-        G_MaxFlow.add_node('s')
-        G_MaxFlow.add_node('t')
-        for i, data in G_MaxFlow.nodes(data=True):
-            if (i != 's') and (i != 't'):
-                try:
-                    b_i = G_MaxFlow.node[i]['demand']
-                except:
-                    pdb.set_trace()
-                if b_i > 0:
-                    G_MaxFlow.add_edge('s', i, capacity=b_i)
-                elif b_i < 0:
-                    G_MaxFlow.add_edge(i, 't', capacity=-b_i)
-
-        cost, flow = nx.maximum_flow(G_MaxFlow, 's', 't')
-        # pdb.set_trace()
-        # cost, flow = nx.capacity_scaling(self.nxg)
-        # print("The minimum cost is:", cost)
-
-        # The data structure of flow is not consistent with dictionary data structure
-        # needed for printing the flow vector
-        feasible_flow = {}
-        cap = {}
-        var= {}
-        mu ={}
-        for i in self.nxg.nodes():
-            for j in flow[i].keys():
-                if j != 't':
-                    if abs(round(flow[i][j],4) - flow[i][j]) <= 1e-10:
-                        flow[i][j] = round(flow[i][j],4)
-                    feasible_flow[i,j] = flow[i][j]
-
-                    # if flow[i][j] == 0:
-                    #     mu[i,j] = 0
-                    #     var[i,j]= 0
-                    #     cap[i,j] = 0
-                    # else:
-                    #     mu[i,j] = mu_top*10000
-                    #     var[i,j]= var_top*10000
-                    #     cap[i,j] = d_top
-
-                    if feasible_flow[i,j] <=1e-12 and feasible_flow[i,j] >0:
-                        pdb.set_trace()
-        # print(feasible_flow)
-        self.initial_flow = feasible_flow
+        cap = nx.get_edge_attributes(self.nxg, 'capacity')
+        self.initial_flow = cap
         self.set_flow_attributes(self.initial_flow)
-        # self.set_parameters(cap, mu, var)
 
 
-        # n = len(self.nxg.nodes())
-        # m = len(self.nxg.edges())
+        # # solve max flow problem
 
-        # self.var = {}
-        # self.cap = {}
-        # self.mu = {}
+        # G_MaxFlow = self.nxg.copy()
+        # G_MaxFlow.add_node('s')
+        # G_MaxFlow.add_node('t')
+        # for i, data in G_MaxFlow.nodes(data=True):
+        #     if (i != 's') and (i != 't'):
+        #         try:
+        #             b_i = G_MaxFlow.node[i]['demand']
+        #         except:
+        #             pdb.set_trace()
+        #         if b_i > 0:
+        #             G_MaxFlow.add_edge('s', i, capacity=b_i)
+        #         elif b_i < 0:
+        #             G_MaxFlow.add_edge(i, 't', capacity=-b_i)
 
-        # self.A = np.zeros((n,m))
-        # i = 0
-        # for u, v, e in self.nxg.edges(data=True):
-        #     self.var[(u,v)] = e.get('var', 0)
-        #     self.cap[(u,v)] = e.get('capacity', 0)
-        #     self.mu[(u,v)] = e.get('mu', 0)
-        #     self.A[u-1, i] = 1
-        #     self.A[v-1, i] = -1
-        #     i += 1
+        # cost, flow = nx.maximum_flow(G_MaxFlow, 's', 't')
+        # # pdb.set_trace()
+        # # cost, flow = nx.capacity_scaling(self.nxg)
+        # # print("The minimum cost is:", cost)
 
-        # self.b = {}
-        # i = 0
-        # for node, dat in self.nxg.nodes(data=True):
-        #     self.b[node] = dat['demand']
-        #     i += 1
+        # # The data structure of flow is not consistent with dictionary data structure
+        # # needed for printing the flow vector
+        # feasible_flow = {}
+        # cap = {}
+        # var= {}
+        # mu ={}
+        # for i in self.nxg.nodes():
+        #     for j in flow[i].keys():
+        #         if j != 't':
 
-        # self.set_weights()
+        #             if abs(round(flow[i][j],4) - flow[i][j]) <= 1e-10:
+        #                 flow[i][j] = round(flow[i][j],4)
+        #             feasible_flow[i,j] = flow[i][j]
+
+        #             # if flow[i][j] == 0:
+        #             #     mu[i,j] = 0
+        #             #     var[i,j]= 0
+        #             #     cap[i,j] = 0
+        #             # else:
+        #             #     mu[i,j] = mu_top*10000
+        #             #     var[i,j]= var_top*10000
+        #             #     cap[i,j] = d_top
+
+        #             if feasible_flow[i,j] <=1e-12 and feasible_flow[i,j] >0:
+        #                 pdb.set_trace()
+        # # print(feasible_flow)
+        # self.initial_flow = feasible_flow
+        # self.set_flow_attributes(self.initial_flow)
+        # # self.set_parameters(cap, mu, var)
+
+
+        # # n = len(self.nxg.nodes())
+        # # m = len(self.nxg.edges())
+
+        # # self.var = {}
+        # # self.cap = {}
+        # # self.mu = {}
+
+        # # self.A = np.zeros((n,m))
+        # # i = 0
+        # # for u, v, e in self.nxg.edges(data=True):
+        # #     self.var[(u,v)] = e.get('var', 0)
+        # #     self.cap[(u,v)] = e.get('capacity', 0)
+        # #     self.mu[(u,v)] = e.get('mu', 0)
+        # #     self.A[u-1, i] = 1
+        # #     self.A[v-1, i] = -1
+        # #     i += 1
+
+        # # self.b = {}
+        # # i = 0
+        # # for node, dat in self.nxg.nodes(data=True):
+        # #     self.b[node] = dat['demand']
+        # #     i += 1
+
+        # # self.set_weights()
 
     def find_feasible_flow_xi(self):
         """Establish a feasible flow
