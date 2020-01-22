@@ -1,3 +1,985 @@
+
+GRAPH_LOC = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
+NMCC_LOC = '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt'
+
+def mosek_solve_lin(G, lam):
+
+    start_time = time.time()
+
+    kwargs = {}
+    kwargs['obj_scalar'] = 1
+    kwargs['mu_scalar'] = 1
+    kwargs['num_nodes'] = 5
+    kwargs['lambar'] = 0.5
+    kwargs['num_arcs'] = 5
+    kwargs['mu_top'] = 1
+    kwargs['var_top'] = 1
+    kwargs['seed'] = 1
+    kwargs['stop_tol'] = 1e-2
+
+    with mf.Model() as model:
+
+        const_time = time.time()
+
+        x = model.variable("x", G.m, Domain.greaterThan(0.0))
+        model.objective("myobj",
+                        ObjectiveSense.Minimize,
+                        Expr.mul(kwargs['obj_scalar'],
+                                 Expr.add(Expr.mul(kwargs['mu_scalar'], Expr.dot(G.mu, x)), Expr.mul(lam, Expr.dot(G.var, x)))))
+        model.constraint(x, Domain.lessThan(G.cap))
+        model.constraint(Expr.sub(Expr.mul(G.A_msk, x), G.b), Domain.equalsTo(0.0))
+
+        # model.setSolverParam("intpntCoTolRelGap", 1.0e-9)
+        # model.setSolverParam("intpntCoTolPfeas", 1.0e-9)
+        # model.setSolverParam("intpntCoTolDfeas", 1.0e-9)
+        # model.setSolverParam("intpntCoTolMuRed", 1.0e-9)
+        # model.setSolverParam("intpntMaxIterations", 100000)
+
+        import logging
+
+        logging = Logger(**kwargs)
+        model.setLogHandler(logging)
+
+        # model.setSolverParam("logIntpnt", 1000)
+        # model.setSolverParam("log", 1000)
+        # model.setSolverParam("logFile", 1000)
+
+        # tm = model.getSolverDoubleInfo("optimizerTime")
+        # om = model.getSolverDoubleInfo("intpntPrimalObj")
+        # it = model.getSolverIntInfo("intpntIter")
+        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
+        const_time = time.time() - const_time
+
+        solve_time = time.time()
+
+        model.solve()
+
+        solve_time = time.time() - solve_time
+
+        overhead = const_time
+        # tm = model.getSolverDoubleInfo("optimizerTime")
+        # om = model.getSolverDoubleInfo("intpntPrimalObj")
+        # it = model.getSolverIntInfo("intpntIter")
+        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
+        # pdb.set_trace()
+        # print(model.primalObjValue())
+        # print('const_time: ', const_time)
+        # print('total_time_elapsed: ', solve_time + const_time)
+        # print(model.Model.getProblemStatus())
+
+        obj = model.primalObjValue()
+        x = x.level()
+
+        elapsed = solve_time + const_time
+        mean_cost = G.mu.dot(x)
+        var_cost = G.var.dot(x)
+        
+    return obj, elapsed, overhead, x, mean_cost, var_cost
+
+def nr_mosek(G):
+    kwargs = {}
+    kwargs['stop_tol'] = 1e-2
+
+    lam = 0.5
+    f = 100
+    found = False
+    iters = 0
+    while not found:
+        iters += 1
+        obj, elapsed, overhead, soln, mean_cost, var_cost = mosek_solve_lin(G, lam)
+        algo_obj = (G.lambar * var_cost + mean_cost)
+
+        f = lam - lambar / (2 * np.sqrt(var_cost))
+
+        if abs(f) < kwargs['stop_tol']:  
+            found = True
+            break
+
+        elapsed, xicost = mosek_solve_xi(G, lam, soln)
+        pdb.set_trace()
+
+        f_lam_der = 1 + (lambar / 2) * (varcost**(-3 / 2)) * xicost
+        lam = lam - f
+
+        print('lam: ', lam)
+
+    end = time.time()
+    print(end - start)
+    print(lam)
+    pdb.set_trace()
+
+def mosek_solve(G):
+
+    kwargs = {}
+    kwargs['obj_scalar'] = 1
+    kwargs['mu_scalar'] = 1
+    kwargs['num_nodes'] = 5
+    kwargs['lambar'] = 0.5
+    kwargs['num_arcs'] = 5
+    kwargs['mu_top'] = 1
+    kwargs['var_top'] = 1
+    kwargs['seed'] = 1
+
+    lambar = G.lambar
+    with mf.Model() as model:
+
+        const_time = time.time()
+
+        x = model.variable("x", G.m, Domain.greaterThan(0.0))
+        x_n = model.variable("x_n", G.m)
+        decoy = model.variable("decoy", 1)
+        decoy_2 = Var.vstack(decoy, x_n)
+        model.objective("myobj",
+                        ObjectiveSense.Minimize,
+                        Expr.mul(kwargs['obj_scalar'],
+                                 Expr.add(Expr.mul(kwargs['mu_scalar'], Expr.dot(G.mu, x)), Expr.mul(lambar, decoy))))
+        model.constraint(Expr.sub(x_n, Expr.mulElm(G.sigma, x)),
+                         Domain.equalsTo(0.0))
+        model.constraint(x, Domain.lessThan(G.cap))
+        model.constraint(decoy_2, Domain.inQCone())
+        model.constraint(Expr.sub(Expr.mul(G.A_msk, x), G.b), Domain.equalsTo(0.0))
+
+        model.setSolverParam("intpntCoTolRelGap", 1.0e-9)
+        model.setSolverParam("intpntCoTolPfeas", 1.0e-9)
+        model.setSolverParam("intpntCoTolDfeas", 1.0e-9)
+        model.setSolverParam("intpntCoTolMuRed", 1.0e-9)
+        model.setSolverParam("intpntMaxIterations", 100000)
+
+        import logging
+
+        logging = Logger(**kwargs)
+        model.setLogHandler(logging)
+
+        # model.setSolverParam("logIntpnt", 1000)
+        # model.setSolverParam("log", 1000)
+        # model.setSolverParam("logFile", 1000)
+
+        # tm = model.getSolverDoubleInfo("optimizerTime")
+        # om = model.getSolverDoubleInfo("intpntPrimalObj")
+        # it = model.getSolverIntInfo("intpntIter")
+        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
+        const_time = time.time() - const_time
+
+        solve_time = time.time()
+
+        model.solve()
+
+        solve_time = time.time() - solve_time
+
+        overhead = const_time
+        tm = model.getSolverDoubleInfo("optimizerTime")
+        om = model.getSolverDoubleInfo("intpntPrimalObj")
+        it = model.getSolverIntInfo("intpntIter")
+        print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
+        # pdb.set_trace()
+        # print(model.primalObjValue())
+        # print('const_time: ', const_time)
+        # print('total_time_elapsed: ', solve_time + const_time)
+        # print(model.Model.getProblemStatus())
+
+        obj = model.primalObjValue()
+
+        x = x.level()
+        mean_cost = G.mu.dot(x)
+        var_cost = G.var.dot(x)
+
+        elapsed = solve_time + const_time
+
+    return obj, elapsed, x
+
+
+
+def mosek_solve(G):
+
+    kwargs = {}
+    kwargs['obj_scalar'] = 1
+    kwargs['mu_scalar'] = 1
+    kwargs['num_nodes'] = 5
+    kwargs['lambar'] = 0.5
+    kwargs['num_arcs'] = 5
+    kwargs['mu_top'] = 1
+    kwargs['var_top'] = 1
+    kwargs['seed'] = 1
+
+    lambar = G.lambar
+    with mf.Model() as model:
+
+        const_time = time.time()
+
+        x = model.variable("x", G.m, Domain.greaterThan(0.0))
+        x_n = model.variable("x_n", G.m)
+        decoy = model.variable("decoy", 1)
+        decoy_2 = Var.vstack(decoy, x_n)
+        model.objective("myobj",
+                        ObjectiveSense.Minimize,
+                        Expr.mul(kwargs['obj_scalar'],
+                                 Expr.add(Expr.mul(kwargs['mu_scalar'], Expr.dot(G.mu, x)), Expr.mul(lambar, decoy))))
+        model.constraint(Expr.sub(x_n, Expr.mulElm(G.sigma, x)),
+                         Domain.equalsTo(0.0))
+        model.constraint(x, Domain.lessThan(G.cap))
+        model.constraint(decoy_2, Domain.inQCone())
+        model.constraint(Expr.sub(Expr.mul(G.A_msk, x), G.b), Domain.equalsTo(0.0))
+
+        # model.setSolverParam("intpntCoTolRelGap", 1.0e-9)
+        # model.setSolverParam("intpntCoTolPfeas", 1.0e-9)
+        # model.setSolverParam("intpntCoTolDfeas", 1.0e-9)
+        # model.setSolverParam("intpntCoTolMuRed", 1.0e-9)
+        # model.setSolverParam("intpntMaxIterations", 100000)
+
+        import logging
+
+        logging = Logger(**kwargs)
+        model.setLogHandler(logging)
+
+        # model.setSolverParam("logIntpnt", 1000)
+        # model.setSolverParam("log", 1000)
+        # model.setSolverParam("logFile", 1000)
+
+        # tm = model.getSolverDoubleInfo("optimizerTime")
+        # om = model.getSolverDoubleInfo("intpntPrimalObj")
+        # it = model.getSolverIntInfo("intpntIter")
+        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
+        const_time = time.time() - const_time
+
+        solve_time = time.time()
+
+        model.solve()
+
+        solve_time = time.time() - solve_time
+
+        overhead = const_time
+        # tm = model.getSolverDoubleInfo("optimizerTime")
+        # om = model.getSolverDoubleInfo("intpntPrimalObj")
+        # it = model.getSolverIntInfo("intpntIter")
+        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
+        # pdb.set_trace()
+        # print(model.primalObjValue())
+        # print('const_time: ', const_time)
+        # print('total_time_elapsed: ', solve_time + const_time)
+        # print(model.Model.getProblemStatus())
+
+        obj = model.primalObjValue()
+
+        x = x.level()
+        mean_cost = G.mu.dot(x)
+        var_cost = G.var.dot(x)
+
+        elapsed = solve_time + const_time
+
+    return obj, elapsed, overhead, mean_cost, var_cost
+
+
+def mosek_solve_xi(G, lam, soln):
+
+    start = time.time()
+
+    x_ = soln
+
+
+    with mf.Model() as model:
+
+        xi = model.variable("x", G.m)
+
+        model.objective("myobj", ObjectiveSense.Minimize, Expr.add(Expr.mul(2, Expr.dot(
+            np.multiply(G.var, x_).T, xi)), Expr.mul(lam, (Expr.dot(G.var.T, xi*xi)))))
+
+        model.constraint(Expr.mul(G.A, xi), Domain.equalsTo(0.0))
+
+        constraints = []
+        for i in range(m):
+            if abs(x_[i]) < 1e-9:
+                model.constraint(xi[i], Domain.greaterThan(0.0))
+            elif x_[i] == cap[i]:
+                model.constraint(xi[i], Domain.lessThan(0.0))
+
+        model.solve()
+
+        xi = xi.level()
+        obj = model.primalObjValue()
+        xi_cost = np.multiply(G.var, x_).dot(xi)
+
+        elapsed = time.time() - start
+
+    return elapsed, xicost 
+
+
+
+def solve_xi_mmc(G, R, xicost, discount=0, nmcc_tot_ms=0, scc_time=0, tol=1e-3, fully=False, nfullytol=1e-3, difftol=1e-5, xicostnoful=1e0, vartop=1e2):
+    prev_augment_amount = -1.0
+    nmcc_exists = True
+    iters = 0
+    consistent = False
+    consistent2 = False
+    consistent3 = False
+    here2 = -10
+    prev_xi_cost = 10
+    here = -10
+    while nmcc_exists:
+        iters += 1
+        st_write = time.time()
+
+        strconnected = True
+        # scc_time_start = time.time()
+        # try:
+        #     scc = max(nx.strongly_connected_components(G), key=len)
+        #     strconnected = False
+        # except:
+        #     pass
+        # scc_time += time.time() - scc_time_start
+
+        if not strconnected:
+            # scc_time_start = time.time()
+            # scc = [c for c in sorted(nx.strongly_connected_components(R.nxg),key=len, reverse=True)]
+            # scc_time += time.time() - scc_time_start
+            # scc_count = len(scc)
+            # maxim = -np.inf
+            # for i in range(scc_count):
+            #     lenlist = len(scc[i])
+            #     if lenlist >  maxim:
+            #         maxim = max(maxim, lenlist)
+            #         max_i = i
+            # nodelist = scc[max_i]
+            nodelist = scc
+            # pdb.set_trace()
+
+            cur_g = R.nxg.copy()
+            allnodes = np.arange(len(R.nxg.nodes)) + 1
+            removals = list(set(allnodes) - set(nodelist))
+            cur_g.remove_nodes_from(removals)
+
+                # manual
+                # R.DG_2_dict(G)
+                # if R.nmcc_exists:
+                #     R.set_nmcc(G)
+                #     nmcc = R.get_nmcc()
+                # else:
+                #     nmcc = []
+
+            output_graph(filename=GRAPH_LOC, g=cur_g, G=G, ptype='xi')
+            solve_nmcc()
+            nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)  
+            
+            resid_nodelist = nodelist
+            nmcc_decoy = []
+            for n in nmcc:
+                nmcc_decoy.append(resid_nodelist[n])
+            nmcc = nmcc_decoy
+        else:
+            output_graph(filename=GRAPH_LOC, g=R, G=G, ptype='xi')
+            solve_nmcc()
+            nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)  
+
+        if len(nmcc) < 3:
+            break
+        # if float(nmcc_cost)/vartop <= -1e-7 :
+        if float(nmcc_cost) >= 0:
+            # print('nmcc cost is bigger than 0')
+            break
+
+        R.set_nmcc_lemon(nmcc)
+        G.set_nmcc_lemon(nmcc)
+        nmcc_tot_ms += nmcc_time_ms
+        discount += time.time() - st_write
+
+        delta = R.find_delta()
+        xsi_star = R.find_xsi_star_xi(G)
+        augment_amount = min(xsi_star, delta)
+        print(augment_amount)
+
+        # if fully:
+        # if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
+        if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
+
+            if not consistent:
+                here = iters
+                consistent = True
+            elif consistent and not consistent2:
+                if here == iters - 1:
+                    consistent2 = True
+                else:
+                    consistent = False
+            elif consistent and consistent2:
+                if here == iters - 2:
+                    print('xsi_star very small')
+                    break
+                else:
+                    consistent = False
+                    consistent2 = False
+        # # if xicost ==0:
+        # #     break
+        # if iters >= 20:
+        #     if iters%20==0:
+        #         xicost=G.xi_cost()
+        #         print('xicost: ', xicost)
+        #         if xicost == 0:
+        #             break
+        #         if abs(100*(prev_xi_cost/xicost -1)) < difftol:
+        #             if consistent3 == False:
+        #                 here2 = iters
+        #                 consistent3 = True
+        #             elif consistent3 == True and here2 == iters-20:
+        #                 break
+        #             else:
+        #                 consistent3 = False
+        #         prev_xi_cost = xicost
+
+        #     if iters%10==0:
+        #         xicost=G.xi_cost()
+        #         if abs(np.sqrt(prev_xicost) - np.sqrt(xicost)) < xicostnoful:
+        #             if consistent == False:
+        #                 here = iters
+        #                 consistent = True
+        #             elif consistent == True and here == iters-10:
+        #                 break
+        #             else:
+        #                 consistent = False
+        #         prev_xicost = xicost
+        #
+        #
+        # else:
+        #     if abs(augment_amount) < tol:
+        #         break
+        #     if iters%5==0:
+        #         xicost=G.xi_cost()
+        #         if abs(100*(np.array(prev_xicost)/(xicost) -1)) < 1e-1:
+        #
+        #         # if abs(np.sqrt(prev_xicost) - np.sqrt(xicost)) < xicostnoful:
+        #             if consistent == False:
+        #                 here = iters
+        #                 consistent = True
+        #             elif consistent == True and here == iters-5:
+        #                 break
+        #             else:
+        #                 consistent = False
+        #         prev_xicost = xicost
+
+        R.augment_flow(augment_amount)
+        G.adjust_flow_xi(nmcc, augment_amount)
+    # print('xi iters: ', iters)
+    xicost = G.xi_cost()
+    nmcc_time = nmcc_tot_ms * 0.001
+    return discount, nmcc_time, scc_time, xicost
+
+
+def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-6, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1, mutop=1e2):
+    prev_augment_amount = -1.0
+    nmcc_exists = True
+    iters = 0
+    consistent = False
+    consistent2 = False
+    consistent3 = False
+    here = -10
+    here2 = -10
+    prev_var_cost = 10
+
+    while nmcc_exists:
+        iters += 1
+        st_write = time.time()
+
+        strconnected = True
+
+        # scc_time_start = time.time()
+
+        # can=nx.is_strongly_connected(R.nxg)
+        # if not can:
+        # strconnected = False
+        # print('not connected')
+        # try:
+        #     scc = max(nx.strongly_connected_components(G), key=len)
+        #
+        # except:
+        #     pass
+        # scc_time += time.time() - scc_time_start
+
+        if not strconnected:
+            scc_time_start = time.time()
+            scc = [c for c in sorted(
+                nx.strongly_connected_components(R.nxg), key=len, reverse=True)]
+            scc_time += time.time() - scc_time_start
+            scc_count = len(scc)
+            maxim = -np.inf
+            for i in range(scc_count):
+                lenlist = len(scc[i])
+                if lenlist > maxim:
+                    maxim = max(maxim, lenlist)
+                    max_i = i
+            nodelist = scc[max_i]
+            cur_g = copy.deepcopy(R.nxg)
+            allnodes = np.arange(len(R.nxg.nodes)) + 1
+            removals = list(set(allnodes) - set(nodelist))
+            cur_g.remove_nodes_from(removals)
+
+            output_graph(filename=GRAPH_LOC, g=cur_g, G=G, ptype='sa')
+            solve_nmcc()
+            nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)  
+        else:
+            output_graph(filename=GRAPH_LOC, g=R, G=G, ptype='sa')
+            solve_nmcc()
+            nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)   
+
+        if len(nmcc) < 3:
+            print('len nmcc is 2')
+            break
+
+        divider = 10**(len(str(vartop)) - 1)
+
+        if float(nmcc_cost) >= 0:  # *1e4/divider >= -1e-4:
+            # print('nmcc cost bigger than 0')
+            break
+
+        R.set_nmcc_lemon(nmcc)
+        G.set_nmcc_lemon(nmcc)
+        nmcc_tot_ms += nmcc_time_ms
+        discount += time.time() - st_write
+
+        delta = R.find_delta()
+        xsi_star = R.find_xsi_star(G)
+
+        augment_amount = min(xsi_star, delta)
+        # print(nmcc_cost, delta, xsi_star)
+        # if not lamsearch:
+        #     if fully:
+        # print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
+        #                 float(nmcc_cost), delta, xsi_star))
+
+        if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
+            # print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
+            #             float(nmcc_cost), delta, xsi_star))
+
+            # if iters >= 10:
+            #     if iters %10 == 0:
+            if not consistent:
+                here = iters
+                consistent = True
+            elif consistent and not consistent2:
+                if here == iters - 1:
+                    consistent2 = True
+                else:
+                    consistent = False
+            elif consistent and consistent2:
+                if here == iters - 2:
+                    # print('xsi star is very small')
+                    # print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
+                    #     float(nmcc_cost), delta, xsi_star))
+                    break
+                else:
+                    consistent = False
+                    consistent2 = False
+        # if iters >= 20:
+        #     if iters%20==0:
+        #         varcost=G.var_cost()
+        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < difftol:
+        #             if consistent3 == False:
+        #                 here2 = iters
+        #                 consistent3 = True
+        #             elif consistent3 == True and here2 == iters-20:
+        #                 break
+        #             else:
+        #                 consistent3 = False
+        #         prev_var_cost = varcost
+        #         #
+        #
+        #     else:
+        #         if abs(augment_amount) <= tol:
+        #             # if consistent == False:
+        #                 # here = iters
+        #                 # consistent = True
+        #             # elif consistent == True and here == iters-1:
+        #             break
+        #             # else:
+        #                 # consistent = False
+        #
+        #
+        # if lamsearch:
+        #
+        #
+        #     # if abs(augment_amount) <= tol:
+        #     #     if consistent == False:
+        #     #         here = iters
+        #     #         consistent = True
+        #     #     elif consistent == True and here == iters-1:
+        #     #         break
+        #     #     else:
+        #     #         consistent = False
+        #             #
+        #     # if float(nmcc_cost) > -10:
+        #     #     break
+        #     if nr_run:
+        #         if abs(augment_amount) <= tol:
+        #             break
+        #
+        #     if iters%5==0:
+        #         varcost=G.var_cost()
+        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < 1e-1:
+        #
+        #         # if abs(np.sqrt(prev_var_cost) - np.sqrt(varcost)) < var_cost_noful_tol:
+        #             if consistent == False:
+        #                 here = iters
+        #                 consistent = True
+        #             elif consistent == True and here == iters-5:
+        #                 break
+        #             else:
+        #                 consistent = False
+        #         prev_var_cost = varcost
+        #
+        # # else:
+        # #     break
+
+        R.augment_flow(augment_amount)
+        G.adjust_flow(nmcc, augment_amount)
+
+    # print('iters: ', iters)
+    varcost = G.var_cost()
+    nmcc_time = nmcc_tot_ms * 0.001
+    return discount, nmcc_time, scc_time, varcost
+
+
+def solve_mcf_sa_lin(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-1, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1e1, mutop=1e2):
+    prev_augment_amount = -1.0
+    nmcc_exists = True
+    iters = 0
+    consistent = False
+    consistent2 = False
+    consistent3 = False
+    here = -10
+    here2 = -10
+    prev_var_cost = 10
+
+    while nmcc_exists:
+        iters += 1
+        st_write = time.time()
+        
+        strconnected = True
+
+        # scc_time_start = time.time()
+
+        # can=nx.is_strongly_connected(R.nxg)
+        # if not can:
+        # strconnected = False
+        # print('not connected')
+        # try:
+        #     scc = max(nx.strongly_connected_components(G), key=len)
+        #
+        # except:
+        #     pass
+        # scc_time += time.time() - scc_time_start
+
+        if not strconnected:
+            scc_time_start = time.time()
+            scc = [c for c in sorted(
+                nx.strongly_connected_components(R.nxg), key=len, reverse=True)]
+            scc_time += time.time() - scc_time_start
+            scc_count = len(scc)
+            maxim = -np.inf
+            for i in range(scc_count):
+                lenlist = len(scc[i])
+                if lenlist > maxim:
+                    maxim = max(maxim, lenlist)
+                    max_i = i
+            nodelist = scc[max_i]
+            cur_g = copy.deepcopy(R.nxg)
+            allnodes = np.arange(len(R.nxg.nodes)) + 1
+            removals = list(set(allnodes) - set(nodelist))
+            cur_g.remove_nodes_from(removals)
+
+            output_graph(filename=GRAPH_LOC, g=cur_g, G=G)
+            solve_nmcc()
+            nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)     
+
+        else:
+            output_graph(filename=GRAPH_LOC, g=R, G=G)
+            solve_nmcc()
+            nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)            
+
+
+        if len(nmcc) < 3:
+            print('len nmcc is 2')
+            break
+
+        if float(nmcc_cost) >= 0:
+            print('nmcc cost bigger than 0')
+            break
+
+        R.set_nmcc_lemon(nmcc)
+        G.set_nmcc_lemon(nmcc)
+        nmcc_tot_ms += nmcc_time_ms
+        discount += time.time() - st_write
+
+        delta = R.find_delta()
+        # xsi_star = R.find_xsi_star(G)
+
+        augment_amount = delta
+        # if not lamsearch:
+        #     if fully:
+        print(augment_amount)
+        if abs(augment_amount) <= nfullytol:
+
+            if not consistent:
+                here = iters
+                consistent = True
+            elif consistent and not consistent2:
+
+                if here == iters - 1:
+                    consistent2 = True
+                else:
+                    consistent = False
+            elif consistent and consistent2:
+
+                if here == iters - 2:
+                    print('xsi star is very small')
+                    print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
+                        float(nmcc_cost), delta, xsi_star))
+
+                    break
+                else:
+                    consistent = False
+                    consistent2 = False
+
+                # if iters >= 20:
+                #     if iters%20==0:
+                #         varcost=G.var_cost()
+                #         print(varcost)
+                #         print(xsi_star)
+                #         print('diff: ', abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)))
+                #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < difftol:
+                #             if consistent3 == False:
+                #                 here2 = iters
+                #                 consistent3 = True
+                #             elif consistent3 == True and here2 == iters-20:
+                #                 break
+                #             else:
+                #                 consistent3 = False
+                #         prev_var_cost = varcost
+        #         #
+        #
+        #     else:
+        #         if abs(augment_amount) <= tol:
+        #             # if consistent == False:
+        #                 # here = iters
+        #                 # consistent = True
+        #             # elif consistent == True and here == iters-1:
+        #             break
+        #             # else:
+        #                 # consistent = False
+        #
+        #
+        # if lamsearch:
+        #
+        #
+        #     # if abs(augment_amount) <= tol:
+        #     #     if consistent == False:
+        #     #         here = iters
+        #     #         consistent = True
+        #     #     elif consistent == True and here == iters-1:
+        #     #         break
+        #     #     else:
+        #     #         consistent = False
+        #             #
+        #     # if float(nmcc_cost) > -10:
+        #     #     break
+        #     if nr_run:
+        #         if abs(augment_amount) <= tol:
+        #             break
+        #
+        #     if iters%5==0:
+        #         varcost=G.var_cost()
+        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < 1e-1:
+        #
+        #         # if abs(np.sqrt(prev_var_cost) - np.sqrt(varcost)) < var_cost_noful_tol:
+        #             if consistent == False:
+        #                 here = iters
+        #                 consistent = True
+        #             elif consistent == True and here == iters-5:
+        #                 break
+        #             else:
+        #                 consistent = False
+        #         prev_var_cost = varcost
+        #
+        # # else:
+        # #     break
+
+        R.augment_flow(augment_amount)
+        G.adjust_flow(nmcc, augment_amount)
+
+    print('iters: ', iters)
+    varcost = G.var_cost()
+    nmcc_time = nmcc_tot_ms * 0.001
+    return discount, nmcc_time, scc_time, varcost
+
+
+
+
+def gurobipy_solve(**kwargs):
+    if kwargs['G'] != None:
+        G = copy.deepcopy(kwargs['G'])
+    else:
+        G = create_random_graph(**kwargs)
+    lambar = kwargs['lambar']
+    G.set_lambda(lam=lambar)
+
+    m = G.nxg.number_of_edges()
+    n = G.nxg.number_of_nodes()
+
+    mu = np.zeros(m)
+    sigma = np.zeros(m)
+    cap = np.zeros(m)
+    d = np.zeros(n)
+    F = np.zeros((m, n))
+
+    i = 0
+    arc_dict = {}
+    A = np.zeros((n, m))
+
+    for u, v, e in G.nxg.edges(data=True):
+        mu[i] = e.get('mu', 0)
+        sigma[i] = np.sqrt(e.get('var', 0))
+        cap[i] = e.get('capacity', 0)
+        arc_dict[i] = (u, v)
+        A[u - 1, i] = 1
+        A[v - 1, i] = -1
+        i += 1
+
+    i = 0
+    for node, dat in G.nxg.nodes(data=True):
+        d[i] = dat['demand']
+        i += 1
+    model = Model('gurobi')
+
+    # Create variables
+
+    A = scipy.sparse.csc_matrix((values, (rows, cols)))
+
+    x = model.addVars(m, name="x")
+    x_n = model.addVars(m, name="x_n")
+    decoy = model.addVar()
+    expr2 = lambar * decoy
+
+    # obj
+
+    mobj = sum(x[k] * mu[k] for k in range(len(x)))
+    model.setObjective((kwargs['mu_scalar'] * mobj + expr2)
+                       * kwargs['obj_scalar'], GRB.MINIMIZE)
+
+    # Arc capacity constraints
+    model.addConstrs((x[i] <= cap[i] for i in range(m)), "upper")
+    model.addConstrs((0 <= x[i] for i in range(m)), "lower")
+    model.addConstrs((x_n[i] == sigma[i] * x[i]
+                      for i in range(m)), "sigma_thing")
+    model.addConstr(decoy * decoy >=
+                    (sum(x_n[k] * x_n[k] for k in range(len(x_n)))))
+
+    constraint_time = time.time()
+
+    model.addMConstrs(A * x == d)
+
+    const_time = time.time() - constraint_time
+
+    # Compute optimal solution
+    if kwargs['max_iters'] == None:
+        model.Params.BarQCPConvTol = 1e-15
+        model.Params.BarIterLimit = 150
+        model.Params.BarConvTol = 1e-15
+        model.Params.FeasibilityTol = 1e-9
+    # else:
+    #     model.Params.BarQCPConvTol = 1e-9
+    #     model.Params.BarConvTol = 1e-9
+    #     model.Params.FeasibilityTol = 1e-9
+    #     model.Params.BarIterLimit = kwargs['max_iters']
+
+    model.Params.OutputFlag = False
+    cvx_time_st = time.time()
+    model.update()
+
+    model.optimize()
+
+    # Print solution
+    # print(model.status)
+    cvx_obj = round(model.ObjVal, kwargs['cutoff'])
+    cvx_elapsed = time.time() - cvx_time_st
+    return cvx_obj, cvx_elapsed, const_time
+
+
+def cvxpy_solve(G):
+
+
+    m = G.nxg.number_of_edges()
+    n = G.nxg.number_of_nodes()
+
+    mu = np.zeros(m)
+    sigma = np.zeros(m)
+    cap = np.zeros(m)
+    d = np.zeros(n)
+    F = np.zeros((m, n))
+    x = cp.Variable(m)
+    theta = cp.Variable(1)
+    # x_n=cp.Variable(m)
+    rows = []
+    values = []
+    cols = []
+    var = np.zeros(m)
+    i = 0
+    arc_dict = {}
+    for u, v, e in G.nxg.edges(data=True):
+        mu[i] = e.get('mu', 0)
+        sigma[i] = np.sqrt(e.get('var', 0))
+        var[i] = e.get('var', 0)
+
+        cap[i] = e.get('capacity', 0)
+        arc_dict[i] = (u, v)
+        rows.append(u - 1)
+        # rows.append(u)
+        cols.append(i)
+        values.append(1)
+        rows.append(v - 1)
+        # rows.append(v)
+        cols.append(i)
+        values.append(-1)
+        i += 1
+
+    i = 0
+    for node, dat in G.nxg.nodes(data=True):
+        d[i] = dat['demand']
+        i += 1
+
+    kwargs = {}
+    kwargs['obj_scalar'] = 1
+    kwargs['mu_scalar'] = 1
+    kwargs['num_nodes'] = n 
+    kwargs['lambar'] = 0.5
+    kwargs['num_arcs'] = m
+    kwargs['mu_top'] = 1
+    kwargs['var_top'] = 1
+    kwargs['seed'] = 1
+
+    lambar = G.lambar
+
+    A = scipy.sparse.csc_matrix((values, (rows, cols)))
+
+    constraints = [0 <= x, x <= cap, A@x == d]
+
+    # objective=cp.Minimize(
+    # (kwargs['mu_scalar'] * mu.T * x + lambar * cp.norm(x_n, 2)) * kwargs['obj_scalar'])
+    objective = cp.Minimize((kwargs['mu_scalar'] * mu.T * x + lambar *
+                             cp.norm(cp.multiply(sigma, x), 2)) * kwargs['obj_scalar'])
+    prob = cp.Problem(objective, constraints)
+
+    # print(objective.value)
+    cvx_time_st = time.time()
+    # 'SCS','ECOS','CVXOPT' - 'MOSEK', 'GUROBI', 'CPLEX'
+    result = prob.solve(solver='MOSEK', verbose=True)  # gurobi mosek compare
+    print(objective.value)
+    # prob.unpack_results(cvx.ECOS, solver_output)
+    # result = prob.solve(solver='MOSEK', verbose=True, mosek_params={'MSK_DPAR_INTPNT_CO_TOL_REL_GAP':1e-20,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-30,'MSK_IPAR_INTPNT_MAX_ITERATIONS':1000})
+    cvx_soln = x.value
+    cvx_obj = objective.value
+    cvx_elapsed = time.time() - cvx_time_st
+    print(prob.solver_stats.solve_time, prob.solver_stats.setup_time)
+    cvx_elapsed = prob.solver_stats.solve_time
+    pdb.set_trace()
+   
+    return cvx_obj, cvx_elapsed, cvx_soln
+
+
 def create_random_graph_uncap(**kwargs):
     """
     Generates random graph with the given network parameters
@@ -1392,35 +2374,6 @@ sys.path.append('~/Downloads/graph-tool-2.27/src/graph_tool/')
 import graph_tool as gt
 
 
-
-def get_prop_type(value, key=None):
-    """
-    Performs typing and value conversion for the graph_tool PropertyMap class.
-    If a key is provided, it also ensures the key is in a format that can be
-    used with the PropertyMap. Returns a tuple, (type name, value, key)
-    """
-    # Deal with the value
-    if isinstance(value, bool):
-        tname = 'bool'
-
-    elif isinstance(value, int):
-        tname = 'float'
-        value = float(value)
-
-    elif isinstance(value, float):
-        tname = 'float'
-
-    elif isinstance(value, unicode):
-        tname = 'string'
-
-    elif isinstance(value, dict):
-        tname = 'object'
-
-    else:
-        tname = 'string'
-        value = str(value)
-
-    return tname, value, key
 
 
 def nx2gt(nxG):
@@ -4048,4 +5001,817 @@ def bisect_solve_exp(**kwargs):
 #     tot_cost = G.mu_cost() + lam*G.var_cost()
 #     print('obj: ', tot_cost)
 #     pdb.set_trace()
+    def DG_3(self, G):
+        g = self.nxg
+        n = len(g.nodes())
+        m = len(g.edges())
 
+        if not nx.is_strongly_connected(g):
+            scc = [c for c in sorted(nx.strongly_connected_components(g),key=len, reverse=True)]
+            scc_count = len(scc)
+            min_lam = []
+            M_l = []
+            K_l = []
+            v_l =[]
+            pi_l = []
+            glen_l =[]
+            curg_l = []
+            dkv_l = []
+            for i in range(scc_count):
+                nodelist = scc[i]
+                if len(nodelist) <= 1:
+                    continue
+
+                cur_g = self.nxg.copy()
+
+                allnodes = np.arange(len(self.nxg.nodes)) + 1
+                removals = list(set(allnodes)-set(nodelist))
+                cur_g.remove_nodes_from(removals)
+                s = self.FindSource(cur_g)
+                nodelist = list(nodelist)
+
+                len_cur_g = len(nodelist)
+                d_kv = np.full((n+1,n), np.inf)
+                pi = np.full((n+1, n), -1)
+                M = np.zeros(n)
+                K = np.zeros(n)
+
+                valid = np.zeros((n+1, n))
+                lastlevel = np.full(n, -1)
+                d_kv[0, s-1] = 0
+                valid[0, s-1] = -1
+                lastlevel[s-1] = 0
+                q = deque()
+                q.append((0,s))
+                v_star = None
+
+                ## Body
+                k, v = q.popleft()
+                while k < len_cur_g:
+                    for u in cur_g.neighbors(v):
+                        if lastlevel[u-1] < k+1:
+                            q.append((k+1,u))
+                            valid[k+1, u-1] = lastlevel[u-1]
+                            lastlevel[u-1] = k+1
+
+                        if G.nxg.has_edge(v,u):
+                            w_vu = G.nxg[v][u]['weight']
+                        else:
+                            w_vu = -G.nxg[u][v]['weight']
+                        pdb.set_trace()
+                        if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                            d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                            pi[k+1, u-1] = v
+                    k,v = q.popleft()
+                ## Tail
+
+                lam = np.inf
+                for v in cur_g.nodes():
+                    if lastlevel[v-1] == n:
+                        M[v-1] = -np.inf
+                        k = valid[len_cur_g, v-1]
+                        while k > -1:
+                            if M[v-1] < (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k):
+                                M[v-1] = (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k)
+                                K[v-1] = k
+                            k = valid[k, v-1]
+                        if lam > M[v-1]:
+                            lam = M[v-1]
+                            v_star = v
+
+                min_lam.append(lam)
+                M_l.append(M)
+                K_l.append(K)
+                v_l.append(v_star)
+                pi_l.append(pi)
+                glen_l.append(len_cur_g)
+                curg_l.append(cur_g)
+                dkv_l.append(d_kv)
+
+            min_ind = np.argmin(min_lam)
+            lam = min_lam[min_ind]
+            M = M_l[min_ind]
+            K = K_l[min_ind]
+            v_star = v_l[min_ind]
+            pi = pi_l[min_ind]
+            glen = glen_l[min_ind]
+            g = curg_l[min_ind]
+            self.d_kv = dkv_l[min_ind]
+            self.M = M
+            self.K = K
+            self.v_star = v_star
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            pdb.set_trace()
+            print(lam)
+            if lam < -1e-6:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+        else:
+
+            d_kv = np.full((n+1,n), np.inf)
+            pi = np.full((n+1, n), -1)
+            valid = np.zeros((n+1, n))
+            M = np.zeros(n)
+            K = np.zeros(n)
+
+            lastlevel = np.full(n, -1)
+            s = self.FindSource(g)
+            d_kv[0, s-1] = 0
+            valid[0, s-1] = -1
+            lastlevel[s-1] = 0
+
+            q = deque()
+            q.append((0,s))
+            ## Body
+            k,v = q.popleft()
+            while k < n:
+                for u in g.neighbors(v):
+                    if lastlevel[u-1] < k+1:
+                        q.append((k+1,u))
+                        valid[k+1, u-1] = lastlevel[u-1]
+                        lastlevel[u-1] = k+1
+
+                    if G.nxg.has_edge(v,u):
+                        w_vu = G.nxg[v][u]['weight']
+                    else:
+                        w_vu = -G.nxg[u][v]['weight']
+
+                    if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                        d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                        pi[k+1, u-1] = v
+                k,v = q.popleft()
+
+            ## Tail
+            lam = np.inf
+            for v in g.nodes():
+                if lastlevel[v-1] == n:
+                    M[v-1] = -np.inf
+                    k = int(valid[n, v-1])
+                    while k > -1:
+                        if M[v-1] < (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k):
+                            M[v-1] = (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k)
+                            K[v-1] = k
+                        k = int(valid[k, v-1])
+                    if lam > M[v-1]:
+                        lam = M[v-1]
+                        self.v_star = v
+
+            self.M = M
+            self.K = K
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            self.d_kv = d_kv
+            if lam < -1e-6:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+    def DG_2(self, G):
+        g = self.nxg
+
+        if not nx.is_strongly_connected(g):
+            scc = [c for c in sorted(nx.strongly_connected_components(g),key=len, reverse=True)]
+            scc_count = len(scc)
+            min_lam = []
+            M_l = []
+            K_l = []
+            v_l =[]
+            pi_l = []
+            glen_l =[]
+            curg_l = []
+            dkv_l = []
+            for i in range(scc_count):
+                nodelist = scc[i]
+                if len(nodelist) <= 1:
+                    continue
+
+                cur_g = self.nxg.copy()
+
+                allnodes = np.arange(len(self.nxg.nodes)) + 1
+                removals = list(set(allnodes)-set(nodelist))
+                cur_g.remove_nodes_from(removals)
+
+                s = self.FindSource(cur_g)
+                nodelist = list(nodelist)
+                n = len(g.nodes())
+                m = len(g.edges())
+                len_cur_g = len(nodelist)
+                d_kv = np.full((n+1,n), np.inf)
+                pi = np.full((n+1, n),-1)
+                Visit = np.zeros((n, 2),dtype=bool)
+                M = np.zeros(n)
+                K = np.zeros(n)
+                v_star = None
+
+                firstv = nodelist[0]
+                lastv = nodelist[-1]
+
+
+                d_kv[0, s-1] = 0
+                # pi[0, s-1] = None
+                turn = 0
+                Visit[s-1, turn] = True
+                ## Body
+
+                for k in range(len_cur_g):
+                # for k in range(firstv-1,lastv-firstv+1):
+                # for k in range(lastv-firstv+1):
+                    for v in nodelist:
+                        if Visit[v-1, turn] == True:
+                            Visit[v-1, turn] = False
+                            for u in cur_g.neighbors(v):
+
+                                if G.nxg.has_edge(v,u):
+                                    w_vu = G.nxg[v][u]['weight']
+                                else:
+                                    w_vu = -G.nxg[u][v]['weight']
+
+                                if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                                    d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                                    pi[k+1, u-1] = v
+                                    Visit[u-1, 1-turn] = True
+                    turn = 1 - turn
+                ## Tail
+                lam = np.inf
+                for v in nodelist:
+                    if Visit[v-1, turn] == True:
+                        M[v-1] = -np.inf
+                        for k in range(len_cur_g):
+                        # for k in range(firstv-1,lastv-firstv+1):
+                        # for k in range(lastv-firstv+1):
+
+                            if M[v-1] < (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k):
+                                M[v-1] = (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k)
+                                K[v-1] = k
+
+                        if lam > M[v-1]:
+                            lam = M[v-1]
+                            v_star = v
+                min_lam.append(lam)
+                M_l.append(M)
+                K_l.append(K)
+                v_l.append(v_star)
+                pi_l.append(pi)
+                glen_l.append(len_cur_g)
+                curg_l.append(cur_g)
+                dkv_l.append(d_kv)
+
+            min_ind = np.argmin(min_lam)
+            lam = min_lam[min_ind]
+            M = M_l[min_ind]
+            K = K_l[min_ind]
+            v_star = v_l[min_ind]
+            pi = pi_l[min_ind]
+            glen = glen_l[min_ind]
+            g = curg_l[min_ind]
+            self.d_kv = dkv_l[min_ind]
+            self.M = M
+            self.K = K
+            self.v_star = v_star
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            if lam < -1e-6:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+        else:
+
+            n = len(g.nodes())
+            m = len(g.edges())
+            d_kv = np.full((n+1,n), np.inf)
+            pi = np.full((n+1, n), -1)
+            Visit = np.zeros((n, 2),dtype=bool)
+            M = np.zeros(n)
+            K = np.zeros(n)
+
+            s = self.FindSource(g)
+            d_kv[0, s-1] = 0
+
+            # pi[0, s-1] = None
+            turn = 0
+            Visit[s-1, turn] = True
+
+            ## Body
+            for k in range(n):
+                for v in g.nodes():
+                    if Visit[v-1, turn] == True:
+                        Visit[v-1, turn] = False
+                        for u in g.neighbors(v):
+
+                            if G.nxg.has_edge(v,u):
+                                w_vu = G.nxg[v][u]['weight']
+                            else:
+                                w_vu = -G.nxg[u][v]['weight']
+
+                            if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                                d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                                pi[k+1, u-1] = v
+                                Visit[u-1, 1-turn] = True
+                turn = 1 - turn
+
+            ## Tail
+            lam = np.inf
+            for v in g.nodes():
+                if Visit[v-1, turn] == True:
+                    M[v-1] = -np.inf
+                    for k in range(n):
+                        if M[v-1] < (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k):
+                            M[v-1] = (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k)
+                            K[v-1] = k
+
+                    if lam > M[v-1]:
+                        lam = M[v-1]
+                        v_star = v
+
+            self.M = M
+            self.K = K
+            self.v_star = v_star
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            self.d_kv = d_kv
+            if lam < -1e-6:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+    def DG_2_dict(self, G):
+        g = self.nxg
+        n = len(g.nodes())
+        m = len(g.edges())
+        orig_dict = nx.to_dict_of_dicts(G.nxg)
+        if not nx.is_strongly_connected(g):
+            scc = [c for c in sorted(nx.strongly_connected_components(g),key=len, reverse=True)]
+            scc_count = len(scc)
+            min_lam = []
+            M_l = []
+            K_l = []
+            v_l =[]
+            pi_l = []
+            glen_l =[]
+            curg_l = []
+            dkv_l = []
+            for i in range(scc_count):
+                nodelist = scc[i]
+                if len(nodelist) <= 1:
+                    continue
+
+                cur_g = self.nxg.copy()
+
+                allnodes = np.arange(len(self.nxg.nodes)) + 1
+                removals = list(set(allnodes)-set(nodelist))
+                cur_g.remove_nodes_from(removals)
+
+                s = self.FindSource(cur_g)
+                nodelist = list(nodelist)
+
+                cur_r_dict = nx.to_dict_of_dicts(g)
+
+                len_cur_g = len(nodelist)
+                d_kv = np.full((n+1,n), np.inf)
+                pi = np.full((n+1, n),-1)
+                Visit = np.zeros((n, 2),dtype=bool)
+                M = np.zeros(n)
+                K = np.zeros(n)
+                v_star = None
+
+                # firstv = nodelist[0]
+                # lastv = nodelist[-1]
+
+
+                d_kv[0, s-1] = 0
+                # pi[0, s-1] = None
+                turn = 0
+                Visit[s-1, turn] = True
+                ## Body
+
+                for k in range(len_cur_g):
+                # for k in range(firstv-1,lastv-firstv+1):
+                # for k in range(lastv-firstv+1):
+                    for v in nodelist:
+                        if Visit[v-1, turn] == True:
+                            Visit[v-1, turn] = False
+                            for u in cur_r_dict[v].keys():
+
+                                try:
+                                    w_vu = orig_dict[v][u]['weight']
+                                except:
+                                    w_vu = -orig_dict[u][v]['weight']
+
+                                if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                                    d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                                    pi[k+1, u-1] = v
+                                    Visit[u-1, 1-turn] = True
+                    turn = 1 - turn
+                ## Tail
+                lam = np.inf
+                for v in nodelist:
+                    if Visit[v-1, turn] == True:
+                        M[v-1] = -np.inf
+                        for k in range(len_cur_g):
+                        # for k in range(firstv-1,lastv-firstv+1):
+                        # for k in range(lastv-firstv+1):
+
+                            if M[v-1] < (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k):
+                                M[v-1] = (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k)
+                                K[v-1] = k
+
+                        if lam > M[v-1]:
+                            lam = M[v-1]
+                            v_star = v
+                min_lam.append(lam)
+                M_l.append(M)
+                K_l.append(K)
+                v_l.append(v_star)
+                pi_l.append(pi)
+                glen_l.append(len_cur_g)
+                curg_l.append(cur_g)
+                dkv_l.append(d_kv)
+
+            min_ind = np.argmin(min_lam)
+            lam = min_lam[min_ind]
+            M = M_l[min_ind]
+            K = K_l[min_ind]
+            v_star = v_l[min_ind]
+            pi = pi_l[min_ind]
+            glen = glen_l[min_ind]
+            g = curg_l[min_ind]
+            self.d_kv = dkv_l[min_ind]
+            self.M = M
+            self.K = K
+            self.v_star = v_star
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            if lam < 0:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+        else:
+
+            d_kv = np.full((n+1,n), np.inf)
+            pi = np.full((n+1, n), -1)
+            Visit = np.zeros((n, 2),dtype=bool)
+            M = np.zeros(n)
+            K = np.zeros(n)
+
+            s = self.FindSource(g)
+            d_kv[0, s-1] = 0
+
+            # pi[0, s-1] = None
+            turn = 0
+            Visit[s-1, turn] = True
+
+            cur_r_dict = nx.to_dict_of_dicts(g)
+            nodelist = list(g.nodes())
+
+            ## Body
+            for k in range(n):
+                for v in nodelist:
+                    if Visit[v-1, turn] == True:
+                        Visit[v-1, turn] = False
+                        for u in cur_r_dict[v].keys():
+
+                            try:
+                                w_vu = orig_dict[v][u]['weight']
+                            except:
+                                w_vu = -orig_dict[u][v]['weight']
+
+                            if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                                d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                                pi[k+1, u-1] = v
+                                Visit[u-1, 1-turn] = True
+                turn = 1 - turn
+
+            ## Tail
+            lam = np.inf
+            for v in nodelist:
+                if Visit[v-1, turn] == True:
+                    M[v-1] = -np.inf
+                    for k in range(n):
+                        if M[v-1] < (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k):
+                            M[v-1] = (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k)
+                            K[v-1] = k
+
+                    if lam > M[v-1]:
+                        lam = M[v-1]
+                        v_star = v
+
+            self.M = M
+            self.K = K
+            self.v_star = v_star
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            self.d_kv = d_kv
+            if lam < 0:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+    def set_nmcc(self, G):
+
+        glen = len(self.g.nodes())
+        cycle_len = int(glen - self.K[self.v_star - 1])
+        path_to_v = [self.v_star]
+        next_v = self.v_star
+
+        loopv = self.v_star
+        for i in range(glen, 0, -1):
+
+            next_v = int(self.pi[i,next_v-1])
+            path_to_v.append(next_v)
+            # if i!=glen and next_v == loopv:
+            #     break
+            if len(path_to_v) != len(set(path_to_v)):
+                st = path_to_v[-1]
+                ind = path_to_v.index(st)
+                path_to_v = path_to_v[ind:]
+                break
+
+        if len(path_to_v) == len(set(path_to_v)):
+            path_to_v = [self.v_star] + path_to_v
+
+        self.nmcc = path_to_v[::-1]
+        #############
+        # print('----Cycle Found-----')
+        # print(self.nmcc)
+
+
+        ####
+        # if (len(self.nmcc)-1) != cycle_len and self.lam_star<-1e-6:
+        #     print('hooop length is different')
+        #     pdb.set_trace()
+
+        # nmcc_cost = 0
+        # for i in range(len(self.nmcc)-1):
+        #     u = self.nmcc[i]
+        #     v = self.nmcc[i+1]
+        #     if G.nxg.has_edge(u,v):
+        #         nmcc_cost += G.nxg[u][v]['weight']
+        #     else:
+        #         nmcc_cost += -G.nxg[v][u]['weight']
+
+        # if round(self.lam_star,2) != round(nmcc_cost/(len(self.nmcc)-1),2):
+        #     print('hooop cost is different')
+        #     pdb.set_trace()
+
+        # print('=======GUPTA_MMC===========')
+        # print('============================')
+        # print('| Cycle: ', self.nmcc, ' | Cost: ', nmcc_cost/(len(self.nmcc)-1), ' | Mmc_true: ', self.lam_star, ' |')
+        # print('| True cycle lenght: ', cycle_len)
+        # print(' ')
+        ######
+
+
+        # self.check_nmcc(G.nxg,G.lam,self.g,cycle_len)
+
+
+        ##########################
+        # cycle_len = int(glen - self.K[self.v_star-1])
+        # print('cycle length: ', cycle_len)
+        # k = glen
+        # P = np.zeros(glen+1)
+        # P[k] = int(self.v_star)
+        # while k>0:
+        #     P[k-1] = int(self.pi[k,int(P[k])-1])
+        #     k = k-1
+
+        # W = np.zeros(glen+1)
+
+        # for i in range(1,glen+1):
+        #     mymin = np.inf
+        #     for j in range(glen+1):
+        #         mymin = min(mymin, self.d_kv[j,i-1] -j*self.lam_star)
+        #     W[i-1] = mymin
+
+        # k = 0
+        # W[k] = 0
+        # while k < glen:
+        #     k = k+1
+        #     if G.nxg.has_edge(P[k-1],P[k]):
+        #         w = G.nxg[P[k-1]][P[k]]['weight']
+        #     else:
+        #         w = -G.nxg[P[k]][P[k-1]]['weight']
+        #     W[k] = W[k-1] + w
+
+        # k = 0
+        # cycle = []
+        # while k <= self.K[self.v_star-1]:
+        #     if (P[k] == P[k+cycle_len]) and (round((W[k+cycle_len] - W[k])/cycle_len,3) == round(self.lam_star,3)):
+        #         # if len(P[k:k+cycle_len+1]) -1 == len(set(P[k:k+cycle_len+1])):
+        #         cycle = P[k:k+cycle_len+1]
+        #         cycle = cycle.astype(int)
+        #     k = k+1
+        # cycle = [n for n in cycle]
+        # try:
+        #     nx = cycle[1:].index(cycle[0])
+        # except:
+        #     pdb.set_trace()
+
+        # cycle = cycle[:nx+2]
+        # while len(cycle) == 0:
+        #     mycopy = self.M.copy()
+        #     minind = np.argmin(mycopy)
+        #     mycopy[minind] = np.inf
+        #     v_star = np.argmin(mycopy)
+        #     cycle_len = int(glen - self.K[v_star])
+        #     k=0
+        #     cycle = []
+        #     while k < self.K[v_star]:
+        #         if (P[k] == P[k+cycle_len]) and (round((W[k+cycle_len] - W[k])/cycle_len,3) == round(self.lam_star,3)):
+        #             if len(P[k:k+cycle_len+1]) -1 == len(set(P[k:k+cycle_len+1])):
+        #                 cycle = P[k:k+cycle_len+1]
+        #                 cycle = cycle.astype(int)
+        #         k = k+1
+
+        # self.nmcc = cycle
+
+    def DG_3_dict(self, G):
+        g = self.nxg
+        n = len(g.nodes())
+        m = len(g.edges())
+        orig_dict = nx.to_dict_of_dicts(G.nxg)
+
+        if not nx.is_strongly_connected(g):
+            scc = [c for c in sorted(nx.strongly_connected_components(g),key=len, reverse=True)]
+            scc_count = len(scc)
+            min_lam = []
+            M_l = []
+            K_l = []
+            v_l =[]
+            pi_l = []
+            glen_l =[]
+            curg_l = []
+            dkv_l = []
+
+            for i in range(scc_count):
+                nodelist = scc[i]
+                if len(nodelist) <= 1:
+                    continue
+
+                cur_g = self.nxg.copy()
+                allnodes = np.arange(len(self.nxg.nodes)) + 1
+                removals = list(set(allnodes)-set(nodelist))
+                cur_g.remove_nodes_from(removals)
+                s = self.FindSource(cur_g)
+                nodelist = list(nodelist)
+
+                len_cur_g = len(nodelist)
+                d_kv = np.full((n+1,n), np.inf)
+                pi = np.full((n+1, n), -1)
+                M = np.zeros(n)
+                K = np.zeros(n)
+
+                valid = np.zeros((n+1, n))
+                lastlevel = np.full(n, -1)
+                d_kv[0, s-1] = 0
+                valid[0, s-1] = -1
+                lastlevel[s-1] = 0
+                q = deque()
+                q.append((0,s))
+                v_star = None
+
+                cur_r_dict = nx.to_dict_of_dicts(cur_g)
+                ## Body
+                k, v = q.popleft()
+                while k < len_cur_g:
+                    for u in cur_r_dict[v].keys():
+                        if lastlevel[u-1] < k+1:
+                            q.append((k+1,u))
+                            valid[k+1, u-1] = lastlevel[u-1]
+                            lastlevel[u-1] = k+1
+
+                        try:
+                            w_vu = orig_dict[v][u]['weight']
+                        except:
+                            w_vu = -orig_dict[u][v]['weight']
+
+                        if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                            d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                            pi[k+1, u-1] = v
+                    k,v = q.popleft()
+                ## Tail
+                lam = np.inf
+                for v in cur_r_dict.keys():
+                    if lastlevel[v-1] == n:
+                        M[v-1] = -np.inf
+                        k = valid[len_cur_g, v-1]
+                        while k > -1:
+                            if M[v-1] < (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k):
+                                M[v-1] = (d_kv[len_cur_g, v-1] - d_kv[k, v-1])/float(len_cur_g-k)
+                                K[v-1] = k
+                            k = valid[k, v-1]
+                        if lam > M[v-1]:
+                            lam = M[v-1]
+                            v_star = v
+
+                min_lam.append(lam)
+                M_l.append(M)
+                K_l.append(K)
+                v_l.append(v_star)
+                pi_l.append(pi)
+                glen_l.append(len_cur_g)
+                curg_l.append(cur_g)
+                dkv_l.append(d_kv)
+
+            min_ind = np.argmin(min_lam)
+            lam = min_lam[min_ind]
+            M = M_l[min_ind]
+            K = K_l[min_ind]
+            v_star = v_l[min_ind]
+            pi = pi_l[min_ind]
+            glen = glen_l[min_ind]
+            g = curg_l[min_ind]
+            self.d_kv = dkv_l[min_ind]
+            self.M = M
+            self.K = K
+            self.v_star = v_star
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            print('lam_star: ', self.lam_star)
+            if lam < -1e-6:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []
+
+        else:
+
+            d_kv = np.full((n+1,n), np.inf)
+            pi = np.full((n+1, n), -1)
+            valid = np.zeros((n+1, n))
+            M = np.zeros(n)
+            K = np.zeros(n)
+
+            lastlevel = np.full(n, -1)
+            s = self.FindSource(g)
+            d_kv[0, s-1] = 0
+            valid[0, s-1] = -1
+            lastlevel[s-1] = 0
+            q = deque()
+            q.append((0,s))
+
+            cur_r_dict = nx.to_dict_of_dicts(g)
+            ## Body
+            k,v = q.popleft()
+            while k < n:
+                for u in cur_r_dict[v].keys():
+                    if lastlevel[u-1] < k+1:
+                        q.append((k+1,u))
+                        valid[k+1, u-1] = lastlevel[u-1]
+                        lastlevel[u-1] = k+1
+
+                    try:
+                        w_vu = orig_dict[v][u]['weight']
+                    except:
+                        w_vu = -orig_dict[u][v]['weight']
+
+                    if d_kv[k+1, u-1] > d_kv[k, v-1] + w_vu:
+                        d_kv[k+1, u-1] = d_kv[k, v-1] + w_vu
+                        pi[k+1, u-1] = v
+                k,v = q.popleft()
+
+            ## Tail
+            lam = np.inf
+            for v in cur_r_dict.keys():
+                if lastlevel[v-1] == n:
+                    M[v-1] = -np.inf
+                    k = int(valid[n, v-1])
+                    while k > -1:
+                        if M[v-1] < (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k):
+                            M[v-1] = (d_kv[n, v-1] - d_kv[k, v-1])/float(n-k)
+                            K[v-1] = k
+                        k = int(valid[k, v-1])
+                    if lam > M[v-1]:
+                        lam = M[v-1]
+                        self.v_star = v
+
+            self.M = M
+            self.K = K
+            self.pi = pi
+            self.lam_star = lam
+            self.g = g
+            self.d_kv = d_kv
+            print('lam_star: ', self.lam_star)
+
+            if lam < -1e-6:
+                self.nmcc_exists = True
+            else:
+                self.nmcc_exists = False
+                self.nmcc = []

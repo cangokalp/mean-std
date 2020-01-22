@@ -2,11 +2,15 @@ import os
 import sys
 import logging
 import subprocess
+import time
 import pdb
 import pickle
+import scipy
 import numpy as np
 import networkx as nx
-
+import mosek
+import mosek.fusion as mf
+from mosek.fusion import Expr, Set, Domain, Var, ObjectiveSense, Matrix
 
 def gen_instance(**kwargs):
     """takes network parameters as input and outputs a file that can be read by the generator"""
@@ -85,6 +89,7 @@ def read_metadata(lines, generator='netgen'):
 
 
 def load_data(networkFileName, G, generator='netgen'):
+    
     try:
         with open(networkFileName, "r") as networkFile:
             fileLines = networkFile.read().splitlines()
@@ -93,19 +98,29 @@ def load_data(networkFileName, G, generator='netgen'):
 
             metadata = read_metadata(fileLines, generator)
 
-            num_nodes = int(metadata['Number of nodes'])
-            num_arcs = int(metadata['Number of arcs'])
+            n = int(metadata['Number of nodes'])
+            m = int(metadata['Number of arcs'])
             max_arc_cost = int(metadata['Maximum arc cost'])
             max_arc_cap = int(metadata['Maximum arc capacity'])
 
+            var = np.zeros(m)
+            mu = np.zeros(m)
+            sigma = np.zeros(m)
+            cap = np.zeros(m)
+            b = np.zeros(n)
+
+            rows = []
+            cols = []
+            values = []
+            i = 0
+            arc_dict = {}
+        
             if generator == 'netgen':
                 min_arc_cost = int(metadata['Minimum arc cost'])
                 total_supply = int(metadata['Total supply'])
                 skltn_max_arc_perc = int(metadata['With max cost'][:-1])
                 skltn_cap_arc_perc = int(metadata['Capacitated'][:-1])
                 random_seed = int(metadata['Random seed'])
-
-            nodes = np.arange(num_nodes) + 1
 
             firstlinedone = False
             extradone = False
@@ -137,16 +152,48 @@ def load_data(networkFileName, G, generator='netgen'):
 
                 data = line.split()
 
-                cap = float(data[4])
-                mu = float(data[5])
+                u = int(data[1])
+                v = int(data[2])
+                mu[i] = float(data[5])
+                if mu[i] == 0:
+                    mu[i] = np.random.uniform(0, max_arc_cost)
                 cov_coef = np.random.uniform(0.15, 0.3)
-                std = mu * cov_coef
-                G.nxg.add_edge(int(data[1]), int(
-                    data[2]), capacity=cap, mu=mu, var=std**2, std=std)
+                sigma[i] = mu[i] * cov_coef
+                var[i] = sigma[i]**2
+                cap[i] = float(data[4])
+                arc_dict[i] = (u, v)
+                
+                rows.append(u - 1)
+                cols.append(i)
+                values.append(1)
+                rows.append(v - 1)
+                cols.append(i)
+                values.append(-1)
+                
+                G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i], std=sigma[i])
+                i += 1
 
         nx.set_node_attributes(G.nxg, 0, 'demand')
         G.nxg.node[source]['demand'] = total_supply
         G.nxg.node[sink]['demand'] = -total_supply
+        G.d_top = total_supply
+        G.mu = mu
+        G.sigma = sigma
+        G.var = var
+        G.cap = cap
+        G.A_msk = Matrix.sparse(n, m, rows, cols, values)
+        G.A = scipy.sparse.csc_matrix((values, (rows, cols)))
+
+        b[source-1] = total_supply
+        b[sink-1] = -total_supply
+        G.b = b
+        G.n = n
+        G.m = m
+        G.arc_dict = arc_dict
+
+        ##add feasible flow for nmcc algo
+        # nx.set_edge_attributes(G.nxg, 0, 'flow')
+        # G.nxg.add_edge(source, sink, capacity=total_supply, flow=total_supply, mu=mu*1e3 ,var=(std**2)*1e3)
         return G
 
     except IOError:
@@ -217,10 +264,11 @@ def read_nmcc(filename):
 
     f.close()
 
-    return nmcc
+    return nmcc, nmcc_time_ms, nmcc_cost
 
 
 def solve_nmcc():
+    
     args = ("../dev/msmcf/msmcf/hello_lemon /Users/cgokalp/repos/dev/msmcf/residual_graph.lgf", "-c")
     popen = subprocess.Popen(args, stdout=subprocess.PIPE, shell=True)
     popen.wait()
@@ -292,3 +340,4 @@ def load(item, num_nodes, experiment_name=''):
     with open(fname, 'rb') as f:
         item = pickle.load(f)
     return item
+
