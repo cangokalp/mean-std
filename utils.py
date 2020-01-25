@@ -122,23 +122,14 @@ def load_data(networkFileName, G, generator='netgen'):
                 skltn_cap_arc_perc = int(metadata['Capacitated'][:-1])
                 random_seed = int(metadata['Random seed'])
 
-            firstlinedone = False
-            extradone = False
 
             for line in fileLines[metadata['END OF METADATA']:]:
                 # Ignore n and p and blank lines
 
-                if generator == 'goto':
-
-                    if line.find("n") == 0 and not extradone:
-                        data = line.split()
-                        if not firstlinedone:
-                            source = int(data[1])
-                            total_supply = int(data[2])
-                            firstlinedone = True
-                        else:
-                            sink = int(data[1])
-                            extradone = True
+                if line.find("n") == 0:
+                    data = line.split()
+                    b[int(data[1])-1] = int(data[2])/10.0
+                    continue 
 
                 line = line.strip()
                 pPos = line.find("p")
@@ -151,55 +142,56 @@ def load_data(networkFileName, G, generator='netgen'):
                     continue
 
                 data = line.split()
-
                 u = int(data[1])
                 v = int(data[2])
-                mu[i] = float(data[5])
+
+                mu[i] = float(data[5])/100.0
                 if mu[i] == 0:
-                    mu[i] = np.random.uniform(0, max_arc_cost)
+                    mu[i] = np.random.uniform(max_arc_cost/4.0, max_arc_cost/1.5)
                 cov_coef = np.random.uniform(0.15, 0.3)
                 sigma[i] = mu[i] * cov_coef
                 var[i] = sigma[i]**2
-                cap[i] = float(data[4])
+                cap[i] = float(data[4])/10.0
                 arc_dict[i] = (u, v)
                 
                 rows.append(u - 1)
                 cols.append(i)
-                values.append(1)
+                values.append(1.0)
                 rows.append(v - 1)
                 cols.append(i)
-                values.append(-1)
+                values.append(-1.0)
                 
                 G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i], std=sigma[i])
                 i += 1
 
         nx.set_node_attributes(G.nxg, 0, 'demand')
-        G.nxg.node[source]['demand'] = total_supply
-        G.nxg.node[sink]['demand'] = -total_supply
-        G.d_top = total_supply
         G.mu = mu
         G.sigma = sigma
         G.var = var
         G.cap = cap
-        G.A_msk = Matrix.sparse(n, m, rows, cols, values)
+        # G.A_msk = Matrix.sparse(n, m, rows, cols, values)
         G.A = scipy.sparse.csc_matrix((values, (rows, cols)))
-
-        b[source-1] = total_supply
-        b[sink-1] = -total_supply
         G.b = b
         G.n = n
         G.m = m
         G.arc_dict = arc_dict
 
-        ##add feasible flow for nmcc algo
-        # nx.set_edge_attributes(G.nxg, 0, 'flow')
-        # G.nxg.add_edge(source, sink, capacity=total_supply, flow=total_supply, mu=mu*1e3 ,var=(std**2)*1e3)
-        return G
 
     except IOError:
         print("\nError reading network file %s" % networkFile)
         traceback.print_exc(file=sys.stdout)
 
+
+
+    for line in fileLines[metadata['END OF METADATA']:]:
+        # Ignore n and p and blank lines
+
+        if line.find("n") == 0:
+            data = line.split()
+            G.nxg.node[int(data[1])]['demand'] = -int(data[2])
+
+
+    return G
 
 class Logger(object):
     """

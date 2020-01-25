@@ -14,7 +14,7 @@ import pstats
 
 import cvxpy as cp
 # from cvxopt import matrix, solvers, spmatrix
-# import cplex
+import cplex
 # import docplex
 # from gurobipy import *
 
@@ -23,12 +23,11 @@ def cvxpy_solve(G):
     start = time.time()
 
     lambar = G.lambar
-    
     x = cp.Variable(G.m)
 
     constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
 
-    objective = cp.Minimize(G.mu.T * x + lambar * cp.norm(cp.multiply(G.sigma, x), 2))
+    objective = cp.Minimize(G.mu * x + lambar * cp.norm(cp.multiply(G.sigma, x), 2))
     prob = cp.Problem(objective, constraints)
     
     # mosek_params = {
@@ -36,7 +35,7 @@ def cvxpy_solve(G):
     #                 "MSK_DPAR_INTPNT_CO_TOL_REL_GAP":1e-12
     #                 }
     mosek_params = {}
-    result = prob.solve(solver='MOSEK', verbose=False, mosek_params=mosek_params)
+    result = prob.solve(solver='MOSEK', verbose=False)
 
     # prob.unpack_results(cvx.ECOS, solver_output)
     # result = prob.solve(solver='MOSEK', verbose=True, mosek_params={,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-30})
@@ -58,27 +57,26 @@ def cvxpy_solve_lin(G, lam, prob=None, warm_start=False):
         x = cp.Variable(G.m)
 
         constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
-        # P = np.multiply(G.var,np.eye(G.m))
-        objective = cp.Minimize(G.mu*x + weight*G.var*cp.square(x))
+        # objective = cp.Minimize(G.mu*x + weight*np.ones(G.m)*x)
+
+        P = np.multiply(G.var,np.eye(G.m))
+        objective = cp.Minimize(G.mu*x + weight*cp.quad_form(x,P))
+
         prob = cp.Problem(objective, constraints)
 
     # weight.value = lam
     prob.parameters()[0].value = lam
-    prob.solve(solver='CPLEX', verbose=False, warm_start=warm_start)
+    prob.solve(solver='MOSEK', verbose=False, warm_start=warm_start)
 
     # soln = x.value
     soln = [variable.value for variable in prob.variables()][0]
     obj = prob.value
-
     elapsed = time.time() - start
-    
-    mean_cost = G.mu.dot(soln)
-    var_cost = G.var.dot(soln**2)
         
-    return obj, elapsed, soln, mean_cost, var_cost, prob
+    return obj, elapsed, soln, prob
 
 
-def cvxpy_solve_xi(G, lam, soln):
+def cvxpy_solve_xi(G, soln, lam):
 
     start = time.time()
 
@@ -87,52 +85,93 @@ def cvxpy_solve_xi(G, lam, soln):
 
     constraints = [G.A@xi == 0]
 
-    ## fix solve_xi
 
     diff = x_ - G.cap
 
-    slack_zero = np.argwhere(x_ < 1e-6)
-    slack_nonzero = np.argwhere(x_ > 1e-6)
+    x_zero = np.argwhere(abs(x_) < 1e-6).ravel()
+    x_nonzero = np.argwhere(x_ > 1e-6).ravel()
+    x_u = np.argwhere(abs(diff) < 1e-6).ravel()
 
-    slack_neg = np.argwhere(abs(diff) < 1e-6)
+    x_btw = list(set(x_nonzero).difference(set(x_u)))
 
-    # constraints.append(xi[slack_pos] >= 0)
-    # constraints.append(xi[slack_neg] <= 0)
+    constraints.append(xi[x_zero] == 0)
+    # constraints.append(xi[x_zero] <= G.cap[x_zero])
 
-    # pos = cp.vstack([xi[i] for i in slack_pos])
-    # neg = cp.vstack([xi[i] for i in slack_neg])
+    constraints.append(xi[x_u] <= 0)
+    constraints.append(xi[x_u] >= -x_[x_u])
 
-    # constraints.append(pos >= 0)
-    # constraints.append(neg <= 0)
+    constraints.append(xi[x_btw] <= G.cap[x_btw] - x_[x_btw])
+    constraints.append(xi[x_btw] >= - x_[x_btw])
 
 
-    # compare against below to check correctness  
+    # objective = cp.Minimize(np.ones(G.m)*xi)
+    P = np.multiply(G.var/100,np.eye(G.m))
+    objective = cp.Minimize(lam*cp.quad_form(xi,P) + 2*np.multiply(G.var/100,x_)*xi)
 
-    constraints.append(xi[slack_zero] == 0)
-    # constraints.append(xi[slack_neg] <= 0)
-    constraints.append(xi[slack_nonzero] <= G.cap[slack_nonzero] - x_[slack_nonzero])
-    constraints.append(xi[slack_nonzero] >= - x_[slack_nonzero])
-
-    # for i in range(G.m):
-    #     if abs(x_[i]) <= 1e-6:
-    #         constraints.append(xi[i]==0)
-    #     else:
-    #         constraints.append(xi[i] <= G.cap[i] - x_[i])
-    #         constraints.append(xi[i] >= -x_[i])
-
-    # objective = cp.Minimize(lam*G.var.T*(xi**2) + 2*np.multiply(G.var,x_).T*xi)
-    objective = cp.Minimize(G.var.T*xi)
-    
     prob = cp.Problem(objective, constraints)
 
-    result = prob.solve(solver='MOSEK', verbose=False)
+    result = prob.solve(solver='GUROBI', verbose=True)
 
     soln = xi.value
     obj = objective.value
 
-    xi_cost = np.multiply(G.var, x_).dot(soln)
     elapsed = time.time() - start
-    return elapsed, xi_cost 
+    return elapsed, soln 
+
+
+
+def bs_cvxpy(G, low=0, high=500.0, prob=None):
+
+    start = time.time()
+
+    kwargs = {}
+    kwargs['stop_tol'] = 1e-5
+
+    f = 100
+    found = False
+    iters = 0
+
+    # high = np.ones(G.m) * high
+    # low = np.ones(G.m) * low
+
+    if prob is not None:
+        warm_start = True
+    else:
+        warm_start = False
+    
+    while not found:
+        iters += 1
+        mid = (high + low) / 2.0
+
+        if iters > 1 and warm_start == False:
+            warm_start = True
+
+        obj, elapsed_1, x, prob = cvxpy_solve_lin(G, mid, prob=prob, warm_start=warm_start)
+        real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(x.dot(np.multiply(G.var,np.eye(G.m))).dot(x)))
+        
+        # elapsed_2, xi = cvxpy_solve_xi(G, x)
+        var_cost = x.dot(np.multiply(G.var,np.eye(G.m))).dot(x)
+
+        f = mid - G.lambar / (2.0 * np.sqrt(var_cost))        
+        # f = mid - G.lambar*(np.multiply(G.var,x).dot(xi))/(np.sqrt(var_cost)*sum(xi))
+
+        print(obj, real_obj, mid, f)
+
+        if abs(f) < kwargs['stop_tol']:  
+            found = True
+            break
+
+        if np.sign(f) == np.sign(1):
+            high = mid
+        else:
+            low = mid
+
+
+    elapsed = time.time() - start
+
+    return real_obj, elapsed, x
+
+
 
 
 def nr_cvxpy(G):
@@ -149,76 +188,30 @@ def nr_cvxpy(G):
 
     while not found:
         iters += 1
-        obj, elapsed, soln, mean_cost, prob = cvxpy_solve_lin(G, lam, prob=prob, warm_start=warm_start)
-        print(obj)
+        obj, elapsed, soln, prob = cvxpy_solve_lin(G, lam, prob=prob, warm_start=warm_start)
+        
+        var_cost = x.dot(np.multiply(G.var,np.eye(G.m))).dot(x)
+        real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(var_cost))
 
-        # f = lam - G.lambar / (2 * np.sqrt(var_cost))
-        # f = lam * var_cost - G.lambar*np.sqrt(var_cost)
-        f = lam*G.var.T.dot(soln) - G.lambar*np.sqrt(G.var.dot(soln**2)) 
-
+        f = lam - G.lambar / (2 * np.sqrt(var_cost))
 
         if abs(f) < kwargs['stop_tol'] or iters > 10:  
             found = True
             break
 
-        elapsed, xi_cost = cvxpy_solve_xi(G, lam, soln)
+        elapsed, xi = cvxpy_solve_xi(G, soln, lam)
 
-        # f_lam_der = 1 + (G.lambar / 2) * (G.var.dot(soln**2)**(-3 / 2)) * xi_cost
-        f_lam_der = G.var.T.dot(soln)
+        xi_cost = np.multiply(G.var, x).dot(xi)
+
+        f_lam_der = 1 + (G.lambar*xi_cost)/(2*var_cost**(-3.0/2.0))
+        
         lam = lam - f/f_lam_der
-
+        
+        print(obj, real_obj, lam, f)
+        pdb.set_trace()
     elapsed = time.time() - start
     print('nr_iter_num: ', iters)
     return obj, elapsed
-
-
-def bs_cvxpy(G, low=0, high=1.0, prob=None):
-
-    start = time.time()
-
-    kwargs = {}
-    kwargs['stop_tol'] = 1e-3
-
-
-
-    f = 100
-    found = False
-    iters = 0
-
-    if prob is not None:
-        warm_start = True
-    else:
-        warm_start = False
-    
-    while not found:
-        iters += 1
-        mid = (high + low) / 2.0
-
-        if iters > 1 and warm_start == False:
-            warm_start = True
-
-        obj, elapsed, soln, mean_cost, var_cost, prob = cvxpy_solve_lin(G, mid, prob=prob, warm_start=warm_start)
-        # f = mid - G.lambar / (2.0 * np.sqrt(var_cost))        
-        f = mid*var_cost - G.lambar*np.sqrt(var_cost)
-        # f = mid*G.var.T.dot(soln) - G.lambar*np.sqrt(var_cost) 
-        # f = mid - G.lambar*G.var.T.dot(soln)/(np.sqrt(var_cost) * sum(G.var))        
-        # f = mid*G.var.T.dot(soln) - G.lambar*np.sqrt(G.var.dot(soln**2)) 
-
-        if abs(f) < kwargs['stop_tol'] or iters > 50:  
-            found = True
-            break
-
-        if np.sign(f) == np.sign(1):
-            high = mid
-        else:
-            low = mid
-
-
-    elapsed = time.time() - start
-
-    return obj, elapsed, soln
-
-
 
 
 def get_upper_bound(G, R, lambar, tol, muscalar, disc_tot=0, nmcc_tot=0):
@@ -1420,26 +1413,44 @@ def run_experiment(num_nodes, lams, mus, variances, d_tops, experiment_name, mul
                             'CVX', cvx_mosek_obj, cvx_elapsed, 1]], headers=['Method', 'Obj_Val', 'Solve_Time', 'Iterations']))
 
 params = {}
-lambar = 0.4
+lambar = 0.9
 G = MCF_DiGraph(lambar)
 G.nxg = nx.DiGraph()
-G = load_data(networkFileName='networks/goto_8_08a.min', G=G, generator='goto')
 
-solver_obj, solver_elapsed, soln = cvxpy_solve(G)
+filename = 'networks/netgen_8_12a.min'
+if filename.find('goto') >=0:
+    generator = 'goto'
+else:
+    generator = 'netgen' 
+
+G = load_data(networkFileName=filename, G=G, generator=generator)
+
+solver_obj, solver_elapsed, soln1 = cvxpy_solve(G)
 print('solver')
 print(solver_obj, solver_elapsed)
 
-# _, bound_elapsed, _, _, var_cost, prob = cvxpy_solve_lin(G, 0, prob=None, warm_start=False)
-# low = G.lambar/(2*np.sqrt(var_cost))
+obj, bound_elapsed, x, prob = cvxpy_solve_lin(G, 0, prob=None, warm_start=False)
+var_cost = x.dot(np.multiply(G.var,np.eye(G.m))).dot(x)
+low = G.lambar/(2.0*np.sqrt(var_cost))
 
-# _, bound_elapsed_2, _, _, var_cost, prob = cvxpy_solve_lin(G, 1000, prob=None, warm_start=False)
-# high = G.lambar/(2*np.sqrt(var_cost))
+# elapsed, xi = cvxpy_solve_xi(G, soln)
+# low = G.lambar*(np.multiply(G.var,soln).dot(xi))/(np.sqrt(var_cost)*sum(xi))
 
-bs_obj, bs_elapsed, soln = bs_cvxpy(G)
+obj, bound_elapsed_2, x, prob = cvxpy_solve_lin(G, 1000, prob=None, warm_start=False)
+var_cost = x.dot(np.multiply(G.var,np.eye(G.m))).dot(x)
+high = G.lambar/(2.0*np.sqrt(var_cost))
+
+# elapsed2, xi = cvxpy_solve_xi(G, soln)
+# high = G.lambar*(np.multiply(G.var,soln).dot(xi))/(np.sqrt(var_cost)*sum(xi))
+
+bound_elapsed = bound_elapsed+bound_elapsed_2
+print(high, low, bound_elapsed)
+
+bs_obj, bs_elapsed, soln2 = bs_cvxpy(G, high=high, low=low, prob=prob)
 print('bs')
 print(bs_obj, bs_elapsed)
+print('total elapsed: ', bs_elapsed + bound_elapsed)
 pdb.set_trace()
-
 
 nr_obj, nr_elapsed = nr_cvxpy(G)
 print('nr')

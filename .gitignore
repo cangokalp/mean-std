@@ -1,4 +1,5 @@
 __pycache__/
+gurobi.log
 logs/
 matlab_files/
 networks/
