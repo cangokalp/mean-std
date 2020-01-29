@@ -810,6 +810,55 @@ def solve_mcf_sa_lin(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, 
 
 
 def gurobipy_solve(**kwargs):
+
+    import gurobipy as grb
+
+    start = time.time()
+
+    if test:
+        
+        m = grb.Model()
+        x = m.addMVar(G.m, lb=-grb.GRB.INFINITY, ub=grb.GRB.INFINITY)
+        diff_ = G.cap[x_btw] - x_[x_btw]
+        b = np.r_[np.zeros(len(x_zero)), np.zeros(len(x_u)), -x_[x_u], diff_, -x_[x_btw]] 
+        cols = np.r_[x_zero, x_u, x_u, x_btw, x_btw]
+        senses = np.r_[[grb.GRB.EQUAL]*len(x_zero), [grb.GRB.LESS_EQUAL]*len(x_u), [grb.GRB.GREATER_EQUAL]*len(x_u), [grb.GRB.LESS_EQUAL]*len(x_btw), [grb.GRB.GREATER_EQUAL]*len(x_btw)]
+        rows = np.arange(len(cols))
+        values = np.ones(len(rows))
+        A = scipy.sparse.csc_matrix((values, (rows, cols)))
+
+        m.addMConstrs(A, x, senses, np.array(b))
+        # m.addMConstrs(G.A, x, '=', np.zeros(G.n))
+        m.addConstr(G.A@x == np.zeros(G.n))
+        
+
+        obj = x.sum()
+
+
+        m.setObjective(obj, grb.GRB.MINIMIZE)
+        m.update()
+
+        # m.reset()
+        m.optimize()
+        print(time.time() - start)
+        pdb.set_trace()
+
+    ### Gurobi 
+    # m = grb.Model()
+    # x = m.addMVar(G.m, lb=0)
+
+    # m.addConstr(G.A@x == G.b)
+    # m.addConstr(x <= G.cap)
+
+    # coeff = G.mu + lam
+    # obj = coeff 
+
+    # m.setObjective(obj@x, grb.GRB.MINIMIZE)
+    # m.update()
+
+    # # m.reset()
+    # m.optimize()
+
     if kwargs['G'] != None:
         G = copy.deepcopy(kwargs['G'])
     else:
@@ -1393,6 +1442,17 @@ def cplex_solve(**kwargs):
 
     c = cplex.Cplex()
 
+    
+    #### CPLEX1
+    # solver_start = time.time()
+    # mpl = AdvModel()
+    # pdb.set_trace()
+    # x = mpl.continuous_var_list(G.m, lb=np.zeros(G.m), ub=G.cap)
+    # mpl.matrix_constraints(G.A, x, G.b, 'E')
+    # coeff = G.mu + lam
+    # mpl.minimize(x[i]*coeff[i] for i in range(len(coeff)))
+    # mpl.solve(log_output=True)
+
     if kwargs['G'] != None:
         G = copy.deepcopy(kwargs['G'])
     else:
@@ -1476,6 +1536,18 @@ def cplex_solve(**kwargs):
                                 rhs = 0,
                                 name = "q2")
 
+    
+    obj = G.mu + lam
+    c.variables.add(obj=obj, lb=np.zeros(G.m), ub=G.cap)
+
+
+    c.objective.set_sense(c.objective.sense.minimize)
+    c.solve()
+    
+    c.solution.get_objective_value()  
+    x = c.solution.get_values()
+
+    c.write("model.lp")
     # Set up the cone map.
     # cone["x1"] = "q1"
     # cone["x2"] = NOT_CONE_HEAD

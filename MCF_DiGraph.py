@@ -77,7 +77,7 @@ class MCF_DiGraph:
         for u, v, e in self.nxg.edges(data=True):
             # var_cost +=  np.square(e.get('flow', 0)) * e.get('var', 0)
             # self.nxg[u][v]['weight'] = self.nxg[u][v]['mu'] + 2*self.lam*self.nxg[u][v]['flow']*self.nxg[u][v]['var']
-            self.nxg[u][v]['weight'] = self.nxg[u][v]['mu'] + lam
+            self.nxg[u][v]['weight'] = self.nxg[u][v]['mu'] + lam[self.arc_dict[(u,v)]]
 
         # self.varcost = var_cost
 

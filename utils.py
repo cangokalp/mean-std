@@ -89,7 +89,7 @@ def read_metadata(lines, generator='netgen'):
 
 
 def load_data(networkFileName, G, generator='netgen'):
-    
+    np.random.seed(seed=9)
     try:
         with open(networkFileName, "r") as networkFile:
             fileLines = networkFile.read().splitlines()
@@ -113,7 +113,6 @@ def load_data(networkFileName, G, generator='netgen'):
             cols = []
             values = []
             i = 0
-            arc_dict = {}
         
             if generator == 'netgen':
                 min_arc_cost = int(metadata['Minimum arc cost'])
@@ -149,10 +148,9 @@ def load_data(networkFileName, G, generator='netgen'):
                 if mu[i] == 0:
                     mu[i] = np.random.uniform(max_arc_cost/4.0, max_arc_cost/1.5)
                 cov_coef = np.random.uniform(0.15, 0.3)
-                sigma[i] = mu[i] * cov_coef
-                var[i] = sigma[i]**2
+                sigma = mu[i] * cov_coef
+                var[i] = sigma**2
                 cap[i] = float(data[4])/10.0
-                arc_dict[i] = (u, v)
                 
                 rows.append(u - 1)
                 cols.append(i)
@@ -161,7 +159,7 @@ def load_data(networkFileName, G, generator='netgen'):
                 cols.append(i)
                 values.append(-1.0)
                 
-                G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i], std=sigma[i])
+                G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i])
                 i += 1
 
         nx.set_node_attributes(G.nxg, 0, 'demand')
@@ -174,21 +172,22 @@ def load_data(networkFileName, G, generator='netgen'):
         G.b = b
         G.n = n
         G.m = m
-        G.arc_dict = arc_dict
-
-
+        G.rows = rows
+        G.cols = cols
+        G.values = values
+        
     except IOError:
         print("\nError reading network file %s" % networkFile)
         traceback.print_exc(file=sys.stdout)
 
 
+    ## for solving the mcf with networkx library
+    # for line in fileLines[metadata['END OF METADATA']:]:
+    #     # Ignore n and p and blank lines
 
-    for line in fileLines[metadata['END OF METADATA']:]:
-        # Ignore n and p and blank lines
-
-        if line.find("n") == 0:
-            data = line.split()
-            G.nxg.node[int(data[1])]['demand'] = -int(data[2])
+    #     if line.find("n") == 0:
+    #         data = line.split()
+    #         G.nxg.node[int(data[1])]['demand'] = -int(data[2])
 
 
     return G
