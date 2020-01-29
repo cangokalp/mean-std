@@ -7,10 +7,10 @@ import pdb
 import pickle
 import scipy
 import numpy as np
-import networkx as nx
-import mosek
-import mosek.fusion as mf
-from mosek.fusion import Expr, Set, Domain, Var, ObjectiveSense, Matrix
+# import networkx as nx
+# import mosek
+# import mosek.fusion as mf
+# from mosek.fusion import Expr, Set, Domain, Var, ObjectiveSense, Matrix
 
 def gen_instance(**kwargs):
     """takes network parameters as input and outputs a file that can be read by the generator"""
@@ -162,7 +162,7 @@ def load_data(networkFileName, G, generator='netgen'):
                 G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i])
                 i += 1
 
-        nx.set_node_attributes(G.nxg, 0, 'demand')
+        # nx.set_node_attributes(G.nxg, 0, 'demand')
         G.mu = mu
         G.sigma = sigma
         G.var = var

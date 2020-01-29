@@ -1,18 +1,18 @@
 from utils import *
 from MCF_DiGraph import *
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import pandas
 import random
 import itertools
 import copy
-from tabulate import tabulate
+# from tabulate import tabulate
 import cProfile
 import pstats
 # sys.path.append('/usr/local/Cellar/graph-tool/2.27_1/lib/python3.7/site-packages/')
 # import graph_tool as gt
 
-import cvxpy as cp
+# import cvxpy as cp
 import cplex
 # from cvxopt import matrix, solvers, spmatrix
 # from docplex.mp.model import Model
@@ -56,25 +56,30 @@ def cvxpy_solve(G):
     prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
 
     prob.objective.set_sense(prob.objective.sense.minimize)
-    pdb.set_trace()
  
-    decoyvar = prob.variables.add(lb=[0], names=['decoy'])
-    prob.multiobj.set_num(2)
-    prob.multiobj.set_linear(1)
+    decoy_name = ['decoy']
+    decoyvar = prob.variables.add(obj=[G.lambar], lb=[0], names=decoy_name)
+    # prob.multiobj.set_num(2)
+    # prob.multiobj.set_linear(1, [(0,1)])
 
-    prob.quadratic_constraints.add(quad_expr=[['decoy'].extend(x_names),
-                                              ['decoy'].extend(x_names),
-                                              [-1.0].extend(G.var)],
+    qc_names_prepped = decoy_name + x_names
+    qc_rhs_prepped = [-1.0]
+    qc_rhs_prepped.extend(G.var)
+
+    prob.quadratic_constraints.add(quad_expr=[qc_names_prepped,
+                                              qc_names_prepped,
+                                              qc_rhs_prepped],
                                     sense = 'L',
-                                    rhs = 0)
+                                    rhs = 0,
+                                    name = 'q1')
 
 
 
-    # prob.set_log_stream(None)
-    # prob.set_error_stream(None)
-    # prob.set_warning_stream(None)
-    # prob.set_results_stream(None)
-    # prob.parameters.mip.display.set(0)
+    prob.set_log_stream(None)
+    prob.set_error_stream(None)
+    prob.set_warning_stream(None)
+    prob.set_results_stream(None)
+    prob.parameters.mip.display.set(0)
 
     prob.solve()
 
@@ -256,12 +261,13 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False):
     kwargs['stop_tol'] = 1e-6
 
     f = 100
-    found = False
     iters = 0
+    found = False
 
     if lp:
         if prob is None:
-            high = np.ones(G.m) * high
+            # high = np.ones(G.m) * high
+            high = np.ones(G.m) * G.lambar
             low = np.ones(G.m) * low
 
     if prob is not None:
@@ -281,9 +287,9 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False):
         
         # var_cost = x.dot(np.diag(G.var)).dot(x)
         var_cost = np.multiply(G.var, x).dot(x)
-        real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(var_cost))
+        # real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(var_cost))
         
-        print(real_obj, elapsed)
+        # print(real_obj, elapsed)
 
         if lp:
             f = mid - G.lambar*np.multiply(G.var,x)/np.sqrt(var_cost)
@@ -291,7 +297,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False):
             f = mid - G.lambar/(2.0 * np.sqrt(var_cost))        
 
         if lp:
-            if np.linalg.norm(f) < 4 or iters>100:  
+            if np.linalg.norm(f) < 4 or iters>10:  
                 found = True
                 break
         else:
@@ -311,8 +317,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False):
                 low = mid
 
     elapsed = time.time() - start
-
-    return obj, elapsed, x
+    return obj, elapsed, x, iters
 
 
 def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False):
@@ -322,13 +327,13 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False):
 
     if lp:
         if prob is None:
-            high = np.ones(G.m) * high
+            high = np.ones(G.m) * G.lambar
             low = np.ones(G.m) * low
 
     lam = (high+low)/2.0
 
-    f = 100
     found = False
+    f = 100
     iters = 0
     warm_start = False
     prob = None
@@ -341,17 +346,11 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False):
             warm_start = True
             warm_start_xi = True
 
-        # st = time.time()
-        # G.set_weights(lam)
-        # flow_dict = nx.min_cost_flow(G.nxg)
-        # print(time.time()-st)
-        # pdb.set_trace()
-
         obj, elapsed, x, prob = cvxpy_solve_additive(G, lam, prob=prob, warm_start=warm_start, lp=lp)
         
         # var_cost = x.dot(np.diag(G.var)).dot(x)
         var_cost = np.multiply(G.var, x).dot(x)
-        real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(var_cost))
+        # real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(var_cost))
 
         if lp:
             f = lam - G.lambar*np.multiply(G.var,x)/np.sqrt(var_cost)
@@ -359,7 +358,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False):
             f = lam - G.lambar/(2.0 * np.sqrt(var_cost))    
 
         if lp:
-            if np.linalg.norm(f) < 4 or iters>100:   
+            if np.linalg.norm(f) < 4 or iters > 5:   
                 found = True
                 break
         else:
@@ -378,12 +377,10 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False):
         
         lam = lam - f/f_lam_der
         lam = np.maximum(lam, np.zeros(G.m))
-
-        print(real_obj, elapsed, elapsed_xi, elapsed+elapsed_xi, time.time()-start)
+        # print(real_obj, elapsed, elapsed_xi, elapsed+elapsed_xi, time.time()-start)
         
     elapsed = time.time() - start
-    print('nr_iter_num: ', iters)
-    return obj, elapsed, x
+    return obj, elapsed, x, iters
 
 
 def get_upper_bound(G, R, lambar, tol, muscalar, disc_tot=0, nmcc_tot=0):
@@ -1589,7 +1586,7 @@ lambar = 0.7
 G = MCF_DiGraph(lambar)
 G.nxg = nx.DiGraph()
 
-filename = 'networks/netgen_8_14a.min'
+filename = 'networks/netgen_8_15a.min'
 if filename.find('goto') >=0:
     generator = 'goto'
 else:
@@ -1598,9 +1595,9 @@ else:
 G = load_data(networkFileName=filename, G=G, generator=generator)
 
 solver_obj, solver_elapsed, x = cvxpy_solve(G)
-print('solver')
-print(solver_obj, solver_elapsed)
-# 208983714.3245787 61.244292974472046
+# print('solver')
+# print(solver_obj, solver_elapsed)
+# 2717472.7248771386 849.5784029960632
 
 
 # obj, bound_elapsed_1, x, prob = cvxpy_solve_additive(G, np.zeros(G.m), prob=None, warm_start=False, lp=True)
@@ -1615,21 +1612,24 @@ print(solver_obj, solver_elapsed)
 # bound_elapsed = bound_elapsed_1 + bound_elapsed_2
 # print(bound_elapsed)
 
-bs_obj, bs_elapsed, x = bs_cvxpy(G, lp=True)
-real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(x.dot(np.diag(G.var)).dot(x)))
 
-print('bs')
-print(real_obj, bs_elapsed)
+nr_obj, nr_elapsed, x, nr_iter_num = nr_cvxpy(G, lp=True)
+nr_real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(np.multiply(G.var, x).dot(x)))
+
+
+bs_obj, bs_elapsed, x, bs_iter_num = bs_cvxpy(G, lp=True)
+bs_real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(np.multiply(G.var, x).dot(x)))
+
+
+from prettytable import PrettyTable
+t = PrettyTable(['Method', 'Solution Time', '# Iterations', 'Objective', 'Rel_Gap'])
+t.add_row(['CPLEX', solver_elapsed, 1, solver_obj, 0])
+t.add_row(['NewtonRaphson', nr_elapsed, nr_iter_num, nr_real_obj, abs(solver_obj - nr_real_obj)/solver_obj])
+t.add_row(['BISECTION', bs_elapsed, bs_iter_num, bs_real_obj, abs(solver_obj - nr_real_obj)/solver_obj])
+
+print(t)
+
 pdb.set_trace()
-
-
-nr_obj, nr_elapsed, x = nr_cvxpy(G, lp=True)
-real_obj = G.mu.dot(x) + G.lambar*(np.sqrt(x.dot(np.diag(G.var)).dot(x)))
-
-print('nr')
-print(real_obj, nr_elapsed)
-pdb.set_trace()
-
 
 
 

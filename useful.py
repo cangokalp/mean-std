@@ -1,4 +1,54 @@
 
+
+# This function creates the following model:
+#   Minimize
+#    obj: x1 + x2 + x3 + x4 + x5 + x6
+#   Subject To
+#    c1: x1 + x2      + x5      = 8
+#    c2:           x3 + x5 + x6 = 10
+#    q1: [ -x1^2 + x2^2 + x3^2 ] <= 0
+#    q2: [ -x4^2 + x5^2 ] <= 0
+#   Bounds
+#    x2 Free
+#    x3 Free
+#    x5 Free
+#   End
+# which is a second order cone program in standard form.
+# The function returns objective, variables and constraints in the
+# values OBJ, VARS and RNGS.
+def createmodel(c, cone):
+    # Create variables.
+    c.variables.add(names = [ "x1", "x2", "x3", "x4", "x5", "x6" ])
+    c.variables.set_lower_bounds([("x2", -CPX.infinity),
+                                  ("x3", -CPX.infinity),
+                                  ("x5", -CPX.infinity)])
+
+    # Create objective function.
+    c.objective.set_linear([("x1", 1), ("x2", 1), ("x3", 1),
+                            ("x4", 1), ("x5", 1), ("x6", 1)])
+
+    # Create constraints.
+    c.linear_constraints.add(lin_expr = [[["x1", "x2", "x5"], [1, 1, 1]],
+                                         [["x3", "x5", "x6"], [1, 1, 1]]],
+                             senses = ['E', 'E'],
+                             rhs = [8, 10],
+                             names = ["c1","c2"])
+    c.quadratic_constraints.add(quad_expr = [["x1", "x2", "x3"],
+                                             ["x1", "x2", "x3"],
+                                             [-1,   1,    1   ]],
+                                sense = 'L',
+                                rhs = 0,
+                                name = "q1")
+    c.quadratic_constraints.add(quad_expr = [["x4", "x5"],
+                                             ["x4", "x5"],
+                                             [-1,   1   ]],
+                                sense = 'L',
+                                rhs = 0,
+                                name = "q2")
+
+
+
+
 GRAPH_LOC = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
 NMCC_LOC = '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt'
 
