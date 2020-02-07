@@ -1,18 +1,90 @@
-import numpy as np
 import matplotlib.pyplot as plt
 import pandas
 import copy
-import pickle
 import pdb
 import pandas as pd
-from tabulate import tabulate
+from utils import *
+
+# plt.plot([7813, 7813], [0., 0.9], "r:")         # Not shown
+# plt.plot([-50000, 7813], [0.9, 0.9], "r:")      # Not shown
+# plt.plot([-50000, 7813], [0.4368, 0.4368], "r:")# Not shown
+# plt.plot([7813], [0.9], "ro")                   # Not shown
+# plt.plot([7813], [0.4368], "ro")                # Not shown
+
+def save_fig(fig_id, tight_layout=True, fig_extension="png", resolution=300):
+    path = os.path.join(PLOTS_PATH, fig_id + "." + fig_extension)
+    print("Saving figure", fig_id)
+
+    if tight_layout:
+        plt.tight_layout()
+    plt.savefig(path, format=fig_extension, dpi=resolution)
+
+"""
+analysis ideas:
+
+comparison family graphs - which kind of graphs which is better
+
+variance ? with a,b,c
+
+comparison how objective changes in each iter in nr / bs - what kind of path tehy follow ,  why does it start 
+very close to the answer / does it change from family to family where it starts?
+
+are the performance of the algorithm change with lambda
+
+base vs reliable solution - gains?
+
+"""
+
+# get the subplot from handsonml notebooks"
+def graph_family(family_name, cplex_times, nr_times):
+    node_num = ['2^10', '2^11', '2^12', '2^13', '2^14']
+    plt.plot(node_num, cplex_times, 'b:o', linewidth=2, label='CPLEX')
+    plt.plot(node_num, nr_times, 'g-+', linewidth=2, label='NR')
+
+    plt.ylabel('Running time', fontsize=16)
+    plt.xlabel('Number of nodes', fontsize=16)
+    # plt.axis([xs,xe,ys,ye])
+    plt.grid(True)
+    plt.title(family_name, fontsize=16)
+    plt.legend(loc='lower right', fontsize=16)
+    save_fig(family_name)
 
 
-def load(list_to_load, num_nodes, experiment_name):
-    list_to_load = 'saved_runs/' + str(num_nodes) + '/' + experiment_name + '/' + list_to_load + '.pickle'
-    with open(list_to_load, 'rb') as f:
-        loaded_list = pickle.load(f)
-    return loaded_list
+
+experiment = 'graph_families'
+
+cplex_times = []
+nr_times = []
+
+bases = ['netgen', 'goto']
+tail = 'a'
+exponents = (np.arange(10, 15)).astype(str)
+types = ['_lo_8_', '_sr_', '_8_', ]
+
+for base in bases:
+    for atype in types:
+        cplex_times = []
+        nr_times = []
+        for exponent in exponents:
+            filename = experiment + '/' + base + '/' + base + atype + exponent + tail
+            data_dic = load_run(filename)
+            cplex_times.append(data_dic['solver_elapsed'])
+            nr_times.append(data_dic['nr_elapsed'])
+        family_type = atype.strip('_')
+        family_name = base.upper() + '-' + family_type + ' family'
+        graph_family(family_name, cplex_times, nr_times)
+
+pdb.set_trace()
+
+
+
+
+
+
+
+
+
+
 
 def get_level_time(gap_list, time_list):
     level_time = {}

@@ -7,10 +7,29 @@ import pdb
 import pickle
 import scipy
 import numpy as np
+import gzip
+import math
+
 # import networkx as nx
 # import mosek
 # import mosek.fusion as mf
 # from mosek.fusion import Expr, Set, Domain, Var, ObjectiveSense, Matrix
+
+# Where to save the figures
+GRAPH_LOC = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
+NMCC_LOC = '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt'
+
+PROJECT_ROOT_DIR = "."
+
+PLOTS_PATH = os.path.join(PROJECT_ROOT_DIR, "plots")
+os.makedirs(PLOTS_PATH, exist_ok=True)
+
+EXPERIMENT_PATH = os.path.join(PROJECT_ROOT_DIR, "saved_runs")
+os.makedirs(EXPERIMENT_PATH, exist_ok=True)
+
+def round_up(n, decimals=0):
+    multiplier = 10 ** decimals
+    return math.ceil(n * multiplier) / multiplier
 
 def gen_instance(**kwargs):
     """takes network parameters as input and outputs a file that can be read by the generator"""
@@ -91,7 +110,10 @@ def read_metadata(lines, generator='netgen'):
 def load_data(networkFileName, G, generator='netgen'):
     np.random.seed(seed=9)
     try:
-        with open(networkFileName, "r") as networkFile:
+        # with open(networkFileName, "r") as networkFile:
+        #         pdb.set_trace()
+        with gzip.open(networkFileName + '.gz', 'rt') as networkFile:
+
             fileLines = networkFile.read().splitlines()
 
             # Set default parameters for metadata, then read
@@ -108,12 +130,13 @@ def load_data(networkFileName, G, generator='netgen'):
             sigma = np.zeros(m)
             cap = np.zeros(m)
             b = np.zeros(n)
+            arc_dict = {}
 
             rows = []
             cols = []
             values = []
             i = 0
-        
+
             if generator == 'netgen':
                 min_arc_cost = int(metadata['Minimum arc cost'])
                 total_supply = int(metadata['Total supply'])
@@ -121,14 +144,13 @@ def load_data(networkFileName, G, generator='netgen'):
                 skltn_cap_arc_perc = int(metadata['Capacitated'][:-1])
                 random_seed = int(metadata['Random seed'])
 
-
             for line in fileLines[metadata['END OF METADATA']:]:
                 # Ignore n and p and blank lines
 
                 if line.find("n") == 0:
                     data = line.split()
-                    b[int(data[1])-1] = int(data[2])/10.0
-                    continue 
+                    b[int(data[1]) - 1] = int(data[2]) / 10.0
+                    continue
 
                 line = line.strip()
                 pPos = line.find("p")
@@ -144,21 +166,23 @@ def load_data(networkFileName, G, generator='netgen'):
                 u = int(data[1])
                 v = int(data[2])
 
-                mu[i] = float(data[5])/100.0
+                mu[i] = float(data[5]) / 100.0
                 if mu[i] == 0:
-                    mu[i] = np.random.uniform(max_arc_cost/4.0, max_arc_cost/1.5)
+                    mu[i] = np.random.uniform(
+                        max_arc_cost / 4.0, max_arc_cost / 1.5)
                 cov_coef = np.random.uniform(0.15, 0.3)
                 sigma = mu[i] * cov_coef
                 var[i] = sigma**2
-                cap[i] = float(data[4])/10.0
-                
+                cap[i] = float(data[4]) / 10.0
+                arc_dict[i] = (u, v)
+
                 rows.append(u - 1)
                 cols.append(i)
                 values.append(1.0)
                 rows.append(v - 1)
                 cols.append(i)
                 values.append(-1.0)
-                
+
                 G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i])
                 i += 1
 
@@ -175,13 +199,13 @@ def load_data(networkFileName, G, generator='netgen'):
         G.rows = rows
         G.cols = cols
         G.values = values
-        
+        G.arc_dict = arc_dict
+
     except IOError:
         print("\nError reading network file %s" % networkFile)
         traceback.print_exc(file=sys.stdout)
 
-
-    ## for solving the mcf with networkx library
+    # for solving the mcf with networkx library
     # for line in fileLines[metadata['END OF METADATA']:]:
     #     # Ignore n and p and blank lines
 
@@ -189,8 +213,8 @@ def load_data(networkFileName, G, generator='netgen'):
     #         data = line.split()
     #         G.nxg.node[int(data[1])]['demand'] = -int(data[2])
 
-
     return G
+
 
 class Logger(object):
     """
@@ -259,16 +283,16 @@ def read_nmcc(filename):
 
 
 def solve_nmcc():
-    
+
     args = ("../dev/msmcf/msmcf/hello_lemon /Users/cgokalp/repos/dev/msmcf/residual_graph.lgf", "-c")
     popen = subprocess.Popen(args, stdout=subprocess.PIPE, shell=True)
     popen.wait()
     output = popen.stdout.read()
 
 
-def output_graph(filename, g, G, ptype='reg'):
+def output_graph(filename, g, G, ptype='sa'):
     g = g.nxg
-    nodelist = [n for n in g.nodes]
+    nodelist = g.nodes()
     f = open(filename, 'w+')
     f.write('@nodes\n')
     f.write('label\n')
@@ -283,27 +307,27 @@ def output_graph(filename, g, G, ptype='reg'):
         try:
             flow = G.nxg[u][v]['flow']
             if ptype == 'sa':
-                w = G.mu_scalar * G.nxg[u][v]['mu'] + \
+                w = G.nxg[u][v]['mu'] + \
                     2 * G.lam * flow * G.nxg[u][v]['var']
             elif ptype == 'xi':
                 w = 2 * curvar * G.nxg[u][v]['flow'] + \
                     2 * G.lam * G.nxg[u][v]['xi'] * curvar
             else:
                 w = G.nxg[u][v]['mu']
-            w = w / 1e6
+            w = w
             f.write(str(u) + '       ' + str(v) + '       ' +
                     str((1.0) * w) + '       ' + str(u) + '\n')
         except:
             flow = G.nxg[v][u]['flow']
             if ptype == 'sa':
-                w = G.mu_scalar * G.nxg[v][u]['mu'] + \
+                w = G.nxg[v][u]['mu'] + \
                     2 * G.lam * flow * G.nxg[v][u]['var']
             elif ptype == 'xi':
                 w = 2 * curvar * G.nxg[v][u]['flow'] + \
                     2 * G.lam * G.nxg[v][u]['xi'] * curvar
             else:
                 w = G.nxg[v][u]['mu']
-            w = w / 1e6
+            w = w 
             f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
                                                                   * w) + '       ' + str(u) + '\n')
     f.write('@attributes\n')
@@ -312,23 +336,17 @@ def output_graph(filename, g, G, ptype='reg'):
     f.close()
 
 
-def save(list_to_save, item, num_nodes, experiment_name=''):
+def save_run(fname, data, extension='pickle'):
+    path = os.path.join(EXPERIMENT_PATH, fname + "." + extension)
 
-    pname = 'saved_runs/' + str(num_nodes) + '/' + experiment_name
-    fname = pname + item + '.pickle'
-
-    if not os.path.exists(pname):
-        os.makedirs(pname)
-
-    with open(fname, 'wb') as f:
-        pickle.dump(list_to_save, f)
+    with open(path, 'wb') as f:
+        pickle.dump(data, f)
 
 
-def load(item, num_nodes, experiment_name=''):
-    pname = 'saved_runs/' + str(num_nodes) + '/' + experiment_name
-    fname = pname + item + '.pickle'
+def load_run(fname, extension='pickle'):
+    path = os.path.join(EXPERIMENT_PATH, fname + "." + extension)
 
-    with open(fname, 'rb') as f:
+    with open(path, 'rb') as f:
         item = pickle.load(f)
-    return item
 
+    return item

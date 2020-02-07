@@ -1,4 +1,161 @@
+def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-6, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1, mutop=1e2):
+    prev_augment_amount = -1.0
+    nmcc_exists = True
+    iters = 0
+    consistent = False
+    consistent2 = False
+    consistent3 = False
+    here = -10
+    here2 = -10
+    prev_var_cost = 10
+    start = time.time()
 
+    while nmcc_exists:
+        iters += 1
+        st_write = time.time()
+
+        strconnected = True
+
+        output_graph(filename=GRAPH_LOC, g=R, G=G, ptype='sa')
+        solve_nmcc()
+        nmcc, nmcc_time_ms, nmcc_cost = read_nmcc(filename=NMCC_LOC)   
+        if len(nmcc) < 3:
+            print('len nmcc is 2')
+            break
+
+        if float(nmcc_cost) >= 0:  # *1e4/divider >= -1e-4:
+            # print('nmcc cost bigger than 0')
+            break
+
+        R.set_nmcc_lemon(nmcc)
+        G.set_nmcc_lemon(nmcc)
+        nmcc_tot_ms += nmcc_time_ms
+        discount += time.time() - st_write
+
+        delta = R.find_delta()
+        xsi_star = R.find_xsi_star(G)
+
+        augment_amount = min(xsi_star, delta)
+        pdb.set_trace()
+        if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
+            print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
+                        float(nmcc_cost), delta, xsi_star))
+
+            # if iters >= 10:
+            #     if iters %10 == 0:
+            if not consistent:
+                here = iters
+                consistent = True
+            elif consistent and not consistent2:
+                if here == iters - 1:
+                    consistent2 = True
+                else:
+                    consistent = False
+            elif consistent and consistent2:
+                if here == iters - 2:
+                    break
+                else:
+                    consistent = False
+                    consistent2 = False
+
+        R.augment_flow(augment_amount)
+        G.adjust_flow(nmcc, augment_amount)
+
+    varcost = G.var_cost()
+    nmcc_time = nmcc_tot_ms * 0.001
+    elapsed = time.time() - start
+    return elapsed, varcost
+
+    
+    # lambar = G.lambar
+    # x = cp.Variable(G.m)
+
+    # constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
+
+    # objective = cp.Minimize(G.mu * x + lambar * cp.norm(cp.multiply(np.sqrt(G.var), x), 2))
+    # prob = cp.Problem(objective, constraints)
+    
+    # # mosek_params = {
+    # #                 "MSK_IPAR_INTPNT_MAX_ITERATIONS": 1000,
+    # #                 "MSK_DPAR_INTPNT_CO_TOL_REL_GAP":1e-12
+    # #                 }
+    # mosek_params = {}
+    # result = prob.solve(solver='GUROBI', verbose=True)
+
+    # # prob.unpack_results(cvx.ECOS, solver_output)
+    # # result = prob.solve(solver='MOSEK', verbose=True, mosek_params={,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-30})
+    
+    # soln = x.value
+    # obj = objective.value
+
+    
+    # if not warm_start:
+        
+    #     x = cp.Variable(G.m)
+
+    #     constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
+        
+    #     if lp:
+    #         weight = cp.Parameter(G.m, nonneg=True)
+    #         objective = cp.Minimize((G.mu+weight)/100.0*x)
+    #     else:
+    #         weight = cp.Parameter(nonneg=True)
+    #         P = np.diag(G.var/100.0)
+    #         objective = cp.Minimize(G.mu/100.0*x + weight*cp.quad_form(x,P))
+
+    #     prob = cp.Problem(objective, constraints)
+
+    # # weight.value = lam
+    # if lp:
+    #     solver = 'MOSEK'
+
+    # prob.parameters()[0].value = lam
+    # prob.solve(solver=solver, verbose=True, warm_start=warm_start)
+
+    # # soln = x.value
+    # soln = [variable.value for variable in prob.variables()][0]
+    # obj = prob.value
+
+
+
+    # if not warm_start:
+
+    #     x_ = cp.Parameter(G.m)
+    #     xi = cp.Variable(G.m)
+
+    #     constraints = [G.A@xi == 0]
+        
+    #     if len(x_zero) > 0:
+    #         constraints.append(xi[x_zero] == 0)
+    #         # constraints.append(xi[x_zero] <= G.cap[x_zero])
+
+    #     if len(x_u) > 0:
+    #         constraints.append(xi[x_u] <= 0)
+    #         constraints.append(xi[x_u] >= -x_[x_u])
+
+    #     if len(x_btw) > 0:
+    #         constraints.append(xi[x_btw] <= G.cap[x_btw] - x_[x_btw])
+    #         constraints.append(xi[x_btw] >= - x_[x_btw])
+
+    #     if lp:
+    #         objective = cp.Minimize(cp.sum(xi))
+    #     else:
+    #         P = np.diag(G.var/100.0)
+    #         objective = cp.Minimize(lam*cp.quad_form(xi,P) + 2*cp.multiply(G.var/100.0,x_)*xi)
+
+    #     prob = cp.Problem(objective, constraints)
+
+
+    # prob.parameters()[0].value = soln
+    
+    # if lp:
+    #     solver = 'CPLEX'
+
+    # result = prob.solve(solver=solver, verbose=True, warm_start=warm_start)
+    # # soln = xi.value
+    # soln = [variable.value for variable in prob.variables()][0]    
+    # # obj = objective.value
+    # obj = prob.value
 
 # This function creates the following model:
 #   Minimize
@@ -49,8 +206,6 @@ def createmodel(c, cone):
 
 
 
-GRAPH_LOC = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
-NMCC_LOC = '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt'
 
 def mosek_solve_lin(G, lam):
 
@@ -615,65 +770,6 @@ def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, diff
                 else:
                     consistent = False
                     consistent2 = False
-        # if iters >= 20:
-        #     if iters%20==0:
-        #         varcost=G.var_cost()
-        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < difftol:
-        #             if consistent3 == False:
-        #                 here2 = iters
-        #                 consistent3 = True
-        #             elif consistent3 == True and here2 == iters-20:
-        #                 break
-        #             else:
-        #                 consistent3 = False
-        #         prev_var_cost = varcost
-        #         #
-        #
-        #     else:
-        #         if abs(augment_amount) <= tol:
-        #             # if consistent == False:
-        #                 # here = iters
-        #                 # consistent = True
-        #             # elif consistent == True and here == iters-1:
-        #             break
-        #             # else:
-        #                 # consistent = False
-        #
-        #
-        # if lamsearch:
-        #
-        #
-        #     # if abs(augment_amount) <= tol:
-        #     #     if consistent == False:
-        #     #         here = iters
-        #     #         consistent = True
-        #     #     elif consistent == True and here == iters-1:
-        #     #         break
-        #     #     else:
-        #     #         consistent = False
-        #             #
-        #     # if float(nmcc_cost) > -10:
-        #     #     break
-        #     if nr_run:
-        #         if abs(augment_amount) <= tol:
-        #             break
-        #
-        #     if iters%5==0:
-        #         varcost=G.var_cost()
-        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < 1e-1:
-        #
-        #         # if abs(np.sqrt(prev_var_cost) - np.sqrt(varcost)) < var_cost_noful_tol:
-        #             if consistent == False:
-        #                 here = iters
-        #                 consistent = True
-        #             elif consistent == True and here == iters-5:
-        #                 break
-        #             else:
-        #                 consistent = False
-        #         prev_var_cost = varcost
-        #
-        # # else:
-        # #     break
 
         R.augment_flow(augment_amount)
         G.adjust_flow(nmcc, augment_amount)
