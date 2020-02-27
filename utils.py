@@ -27,6 +27,7 @@ os.makedirs(PLOTS_PATH, exist_ok=True)
 EXPERIMENT_PATH = os.path.join(PROJECT_ROOT_DIR, "saved_runs")
 os.makedirs(EXPERIMENT_PATH, exist_ok=True)
 
+
 def round_up(n, decimals=0):
     multiplier = 10 ** decimals
     return math.ceil(n * multiplier) / multiplier
@@ -35,6 +36,46 @@ def gen_instance(**kwargs):
     """takes network parameters as input and outputs a file that can be read by the generator"""
     pass
 
+
+def parse_cplex_log():
+    elapsed = []
+    objs = []
+
+    log = 'cplex_log.txt'
+    f = open(log, 'r+')
+
+    start_parsing = False
+    order_time = 0
+    presolve_time = 0
+    for line in f.readlines():
+        if start_parsing:
+            if count % 2 == 1:
+                line = line.strip()
+                elapsed.append(float(line[:line.find('s')]))
+
+            if count % 2 == 0:
+                partial = line[line.find(' '):].strip()
+                partial = partial[partial.find(' '):].strip()
+                objs.append(float(partial[:partial.find(' ')]))
+
+            count += 1
+
+        if line.find('Total time for automatic ordering') >= 0:
+            order_time = float(
+                line[line.find('=') + 1:line.find('sec')].strip())
+        if line.find('Itn') >= 0:
+            start_parsing = True
+            parse_obj = True
+            count = 0
+        if line.find('Presolve time') >= 0:
+            presolve_time = float(
+                line[line.find('=') + 1:line.find('sec')].strip())
+
+    f.close()
+
+    return elapsed, objs, presolve_time, order_time
+
+    
 
 def read_metadata(lines, generator='netgen'):
     """
@@ -108,7 +149,7 @@ def read_metadata(lines, generator='netgen'):
 
 
 def load_data(networkFileName, G, generator='netgen'):
-    np.random.seed(seed=9)
+    np.random.seed(seed=10)
     try:
         # with open(networkFileName, "r") as networkFile:
         #         pdb.set_trace()
@@ -149,7 +190,7 @@ def load_data(networkFileName, G, generator='netgen'):
 
                 if line.find("n") == 0:
                     data = line.split()
-                    b[int(data[1]) - 1] = int(data[2]) / 10.0
+                    b[int(data[1]) - 1] = int(data[2]) 
                     continue
 
                 line = line.strip()
@@ -166,14 +207,14 @@ def load_data(networkFileName, G, generator='netgen'):
                 u = int(data[1])
                 v = int(data[2])
 
-                mu[i] = float(data[5]) / 100.0
-                if mu[i] == 0:
-                    mu[i] = np.random.uniform(
-                        max_arc_cost / 4.0, max_arc_cost / 1.5)
+                mu[i] = float(data[5]) #/ 100.0
+                # if mu[i] == 0:
+                #     mu[i] = np.random.uniform(
+                #         max_arc_cost / 4.0, max_arc_cost / 1.5)
                 cov_coef = np.random.uniform(0.15, 0.3)
                 sigma = mu[i] * cov_coef
                 var[i] = sigma**2
-                cap[i] = float(data[4]) / 10.0
+                cap[i] = float(data[4]) 
                 arc_dict[i] = (u, v)
 
                 rows.append(u - 1)

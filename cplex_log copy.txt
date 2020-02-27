@@ -1,0 +1,51 @@
+CPXPARAM_Read_DataCheck                          1
+CPXPARAM_Barrier_Algorithm                       2
+CPXPARAM_Barrier_Display                         2
+CPXPARAM_Barrier_Limits_Corrections              10
+CPXPARAM_Barrier_QCPConvergeTol                  1.0000000000000001e-09
+Tried aggregator 1 time.
+QCP Presolve eliminated 1 rows and 86 columns.
+Reduced QCP has 523308 rows, 519214 columns, and 1300363 nonzeros.
+Reduced QCP has 1 quadratic constraints.
+Presolve time = 0.45 sec. (398.49 ticks)
+Parallel mode: using up to 8 threads for barrier.
+Looking for dense columns with more than 5 nonzeros.
+
+***NOTE: Found 1 dense columns.
+
+Number of nonzeros in lower triangle of A*A' = 1509738
+Using Approximate Minimum Degree ordering
+Total time for automatic ordering = 0.19 sec. (53.14 ticks)
+Summary statistics for Cholesky factor:
+  Threads                   = 8
+  Rows in Factor            = 523308
+  Integer space required    = 1051709
+  Total non-zeros in factor = 9850121
+  Total FP ops to factor    = 20980143359
+L has 262062 super-nodes.
+Histogram of super-node widths:
+SupWidth:      1      2     38     46     62   3949
+  Number:   4903 257155      1      1      1      1
+
+ Itn      Primal Obj        Dual Obj  Prim Inf Upper Inf  Dual Inf Inf Ratio
+   0   1.1045896e+08   0.0000000e+00  1.26e+10  0.00e+00  1.10e+08  1.00e+00
+       1.00s (591.80 ticks) for iteration (0.48s, 43321 Mflops for lin. solve)
+   1   1.1046255e+08   3.6063334e+03  1.26e+10  0.00e+00  1.10e+08  7.69e-01
+       1.71s (993.73 ticks) for iteration (0.65s, 32404 Mflops for lin. solve)
+   2   1.1047715e+08   1.8205642e+04  1.26e+10  0.00e+00  1.10e+08  7.66e-01
+       1.99s (1021.60 ticks) for iteration (0.86s, 24305 Mflops for lin. solve)
+   3   1.1059896e+08   1.4004349e+05  1.26e+10  0.00e+00  1.10e+08  7.09e-01
+       2.11s (1014.65 ticks) for iteration (0.94s, 22364 Mflops for lin. solve)
+   4   1.1042930e+08  -2.9640255e+04  1.26e+10  0.00e+00  1.10e+08  7.01e-01
+       1.42s (1015.63 ticks) for iteration (0.40s, 52133 Mflops for lin. solve)
+   5   1.1282997e+08   2.3717584e+06  1.26e+10  0.00e+00  1.10e+08  7.16e-02
+       1.44s (1028.09 ticks) for iteration (0.37s, 56194 Mflops for lin. solve)
+   6   1.2147250e+08   1.1017483e+07  1.26e+10  0.00e+00  1.10e+08  2.78e-02
+       1.65s (1014.65 ticks) for iteration (0.42s, 49615 Mflops for lin. solve)
+   7   1.4023843e+08   2.9802996e+07  1.26e+10  0.00e+00  1.10e+08  2.27e-02
+       1.51s (1014.65 ticks) for iteration (0.48s, 43302 Mflops for lin. solve)
+   8   4.2674015e+08   3.1661527e+08  1.26e+10  0.00e+00  1.10e+08  3.93e-03
+       1.71s (1183.41 ticks) for iteration (0.42s, 50164 Mflops for lin. solve)
+   9   1.4454192e+09   1.3361853e+09  1.26e+10  0.00e+00  1.10e+08  1.43e-03
+       5.23s (2966.53 ticks) for iteration (0.44s, 47728 Mflops for lin. solve)
+  10   6.3916605e+09   6.2881211e+09  1.25e+10  0.00e+00  1.09e+08  3.62e-04
