@@ -157,7 +157,6 @@ def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, diff
     # # obj = objective.value
     # obj = prob.value
 
-
 def createmodel(c, cone):
     # Create variables.
     c.variables.add(names = [ "x1", "x2", "x3", "x4", "x5", "x6" ])
@@ -373,8 +372,6 @@ def mosek_solve(G):
 
     return obj, elapsed, x
 
-
-
 def mosek_solve(G):
 
     kwargs = {}
@@ -454,7 +451,6 @@ def mosek_solve(G):
 
     return obj, elapsed, overhead, mean_cost, var_cost
 
-
 def mosek_solve_xi(G, lam, soln):
 
     start = time.time()
@@ -487,8 +483,6 @@ def mosek_solve_xi(G, lam, soln):
         elapsed = time.time() - start
 
     return elapsed, xicost 
-
-
 
 def solve_xi_mmc(G, R, xicost, discount=0, nmcc_tot_ms=0, scc_time=0, tol=1e-3, fully=False, nfullytol=1e-3, difftol=1e-5, xicostnoful=1e0, vartop=1e2):
     prev_augment_amount = -1.0
@@ -646,7 +640,6 @@ def solve_xi_mmc(G, R, xicost, discount=0, nmcc_tot_ms=0, scc_time=0, tol=1e-3, 
     nmcc_time = nmcc_tot_ms * 0.001
     return discount, nmcc_time, scc_time, xicost
 
-
 def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-6, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1, mutop=1e2):
     prev_augment_amount = -1.0
     nmcc_exists = True
@@ -759,7 +752,6 @@ def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, diff
     varcost = G.var_cost()
     nmcc_time = nmcc_tot_ms * 0.001
     return discount, nmcc_time, scc_time, varcost
-
 
 def solve_mcf_sa_lin(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-1, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1e1, mutop=1e2):
     prev_augment_amount = -1.0
@@ -1071,88 +1063,6 @@ def gurobipy_solve(G):
     print(time.time() - start)
     pdb.set_trace()
 
-
-def cvxpy_solve(G):
-
-
-    m = G.nxg.number_of_edges()
-    n = G.nxg.number_of_nodes()
-
-    mu = np.zeros(m)
-    sigma = np.zeros(m)
-    cap = np.zeros(m)
-    d = np.zeros(n)
-    F = np.zeros((m, n))
-    x = cp.Variable(m)
-    theta = cp.Variable(1)
-    # x_n=cp.Variable(m)
-    rows = []
-    values = []
-    cols = []
-    var = np.zeros(m)
-    i = 0
-    arc_dict = {}
-    for u, v, e in G.nxg.edges(data=True):
-        mu[i] = e.get('mu', 0)
-        sigma[i] = np.sqrt(e.get('var', 0))
-        var[i] = e.get('var', 0)
-
-        cap[i] = e.get('capacity', 0)
-        arc_dict[i] = (u, v)
-        rows.append(u - 1)
-        # rows.append(u)
-        cols.append(i)
-        values.append(1)
-        rows.append(v - 1)
-        # rows.append(v)
-        cols.append(i)
-        values.append(-1)
-        i += 1
-
-    i = 0
-    for node, dat in G.nxg.nodes(data=True):
-        d[i] = dat['demand']
-        i += 1
-
-    kwargs = {}
-    kwargs['obj_scalar'] = 1
-    kwargs['mu_scalar'] = 1
-    kwargs['num_nodes'] = n 
-    kwargs['lambar'] = 0.5
-    kwargs['num_arcs'] = m
-    kwargs['mu_top'] = 1
-    kwargs['var_top'] = 1
-    kwargs['seed'] = 1
-
-    lambar = G.lambar
-
-    A = scipy.sparse.csc_matrix((values, (rows, cols)))
-
-    constraints = [0 <= x, x <= cap, A@x == d]
-
-    # objective=cp.Minimize(
-    # (kwargs['mu_scalar'] * mu.T * x + lambar * cp.norm(x_n, 2)) * kwargs['obj_scalar'])
-    objective = cp.Minimize((kwargs['mu_scalar'] * mu.T * x + lambar *
-                             cp.norm(cp.multiply(sigma, x), 2)) * kwargs['obj_scalar'])
-    prob = cp.Problem(objective, constraints)
-
-    # print(objective.value)
-    cvx_time_st = time.time()
-    # 'SCS','ECOS','CVXOPT' - 'MOSEK', 'GUROBI', 'CPLEX'
-    result = prob.solve(solver='MOSEK', verbose=True)  # gurobi mosek compare
-    print(objective.value)
-    # prob.unpack_results(cvx.ECOS, solver_output)
-    # result = prob.solve(solver='MOSEK', verbose=True, mosek_params={'MSK_DPAR_INTPNT_CO_TOL_REL_GAP':1e-20,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-30,'MSK_IPAR_INTPNT_MAX_ITERATIONS':1000})
-    cvx_soln = x.value
-    cvx_obj = objective.value
-    cvx_elapsed = time.time() - cvx_time_st
-    print(prob.solver_stats.solve_time, prob.solver_stats.setup_time)
-    cvx_elapsed = prob.solver_stats.solve_time
-    pdb.set_trace()
-   
-    return cvx_obj, cvx_elapsed, cvx_soln
-
-
 def create_random_graph_uncap(**kwargs):
     """
     Generates random graph with the given network parameters
@@ -1202,7 +1112,6 @@ def create_random_graph_uncap(**kwargs):
     G.set_weight_uc(kwargs['lambar'])
     return G
 
-
 def read_and_create_graph(**kwargs):
     mu_top = kwargs['mu_top']
     var_top = kwargs['var_top'] * kwargs['var_scalar']
@@ -1243,7 +1152,6 @@ def read_and_create_graph(**kwargs):
 
     G.find_feasible_flow(d_top, mu_top, var_top)
     return G
-
 
 def create_random_graph(**kwargs):
 
@@ -1562,6 +1470,7 @@ def create_random_graph(**kwargs):
     # f.close()
 
     return G
+
 def cplex_solve(**kwargs):
 
     c = cplex.Cplex()
@@ -1725,6 +1634,8 @@ def cplex_solve(**kwargs):
     # model.setSolverParam("intpntCoTolRelGap", 1.0e-9)
     # model.setSolverParam("intpntCoTolPfeas", 1.0e-9)
     # model.setSolverParam("intpntCoTolDfeas", 1.0e-9)
+
+
     # model.setSolverParam("intpntCoTolMuRed", 1.0e-9)
     # model.setSolverParam("intpntMaxIterations", 100000)
     # # else:
@@ -1793,6 +1704,7 @@ def cplex_solve(**kwargs):
     # cvx_elapsed = solve_time + const_time
 
     # return cvx_obj, cvx_elapsed, mosek_overhead, x, mu.dot(x), decoy.level()[0]
+    
 def cvxpy_solve_xi(G,lam):
 
     cvx_time_st = time.time()

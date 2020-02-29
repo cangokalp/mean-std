@@ -9,11 +9,10 @@ import scipy
 import numpy as np
 import gzip
 import math
+# from mosek.fusion import Expr, Set, Domain, ObjectiveSense, Matrix
 
 # import networkx as nx
 # import mosek
-# import mosek.fusion as mf
-# from mosek.fusion import Expr, Set, Domain, Var, ObjectiveSense, Matrix
 
 # Where to save the figures
 GRAPH_LOC = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
@@ -232,15 +231,14 @@ def load_data(networkFileName, G, generator='netgen'):
         G.sigma = sigma
         G.var = var
         G.cap = cap
-        # G.A_msk = Matrix.sparse(n, m, rows, cols, values)
-        G.A = scipy.sparse.csc_matrix((values, (rows, cols)))
+        G.A = scipy.sparse.csc_matrix((values, (rows, cols)))       
         G.b = b
         G.n = n
         G.m = m
         G.rows = rows
         G.cols = cols
         G.values = values
-        G.arc_dict = arc_dict
+
 
     except IOError:
         print("\nError reading network file %s" % networkFile)
@@ -265,31 +263,13 @@ class Logger(object):
     time to end of file name.
     """
 
-    def __init__(self, **kwargs):
-        num_nodes = kwargs['num_nodes']
-        # pname = 'saved_runs/' + str(num_nodes) + '/' + experiment_name
-        pname = 'test'
-        # lamBar = kwargs['lambar'] * kwargs['scale']
-        lamBar = kwargs['lambar']
+    def __init__(self, run_dir):
 
-        lamstr = str(lamBar)
-        lamstr = lamstr.replace(".", "-")
-        narcs = kwargs['num_arcs']
-        mu_top = kwargs['mu_top']
-        var_top = kwargs['var_top']
-        seed = kwargs['seed']
-        save_extension = lamstr + '_' + \
-            str(mu_top) + str(var_top) + '_' + str(narcs) + '_' + str(seed)
-        # self.filename = pname + save_extension + '.txt'
-        self.filename = pname + '.txt'
-
-        if not os.path.exists(pname):
-            os.makedirs(pname)
-
+        # self.terminal = sys.stdout
+        self.filename = run_dir + 'mosek_log.txt'
         self.log = open(self.filename, "w")
 
     def write(self, message):
-        # self.terminal.write(message)
         self.log.write(message)
 
     def flush(self):
@@ -377,8 +357,13 @@ def output_graph(filename, g, G, ptype='sa'):
     f.close()
 
 
-def save_run(fname, data, extension='pickle'):
-    path = os.path.join(EXPERIMENT_PATH, fname + "." + extension)
+def save_run(fname, data, extension='pickle', prefix=None):
+
+    if prefix is not None:
+        path = os.path.join(EXPERIMENT_PATH, prefix)
+        path = os.path.join(path, fname + "." + extension)
+    else:
+        path = os.path.join(EXPERIMENT_PATH, fname + "." + extension)
 
     with open(path, 'wb') as f:
         pickle.dump(data, f)

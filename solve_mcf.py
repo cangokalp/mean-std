@@ -6,258 +6,335 @@ import pandas
 import random
 import itertools
 import copy
-# from tabulate import tabulate
 import cProfile
 import pstats
 # sys.path.append('/usr/local/Cellar/graph-tool/2.27_1/lib/python3.7/site-packages/')
 # import graph_tool as gt
-
-import cplex
 from prettytable import PrettyTable
 import caffeine
 
 
-def cvxpy_any(G, solver='ECOS'):
-
-    start = time.time()
-    x = cp.Variable(G.m)
-    constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
-    objective = cp.Minimize(G.mu.T * x + G.lambar*cp.norm(cp.multiply(np.sqrt(G.var), x), 2))
-    prob = cp.Problem(objective, constraints)
-
-    # result = prob.solve(solver=solver, verbose=True)  # gurobi mosek compare
-
-    result = prob.solve(solver='MOSEK', verbose=True, mosek_params={'MSK_DPAR_INTPNT_CO_TOL_REL_GAP':1e-12,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-12,'MSK_IPAR_INTPNT_MAX_ITERATIONS':1000})
-    print(objective.value)
-    
-    cvx_soln = x.value
-    cvx_obj = objective.value
-
-    # print(prob.solver_stats.solve_time, prob.solver_stats.setup_time)
-    cvx_elapsed = prob.solver_stats.solve_time
-    elapsed = time.time() - start
-
-    return cvx_obj, elapsed, cvx_soln
-
-
-def cvxpy_solve(G):
+def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
     start = time.time()
 
-    prob = cplex.Cplex()
+    if fusion:
+        G.A_msk = mf.Matrix.sparse(G.n, G.m, G.rows, G.cols, G.values)
 
-    x_names = ['x' + str(i) for i in range(G.m)]
-    lin_obj = G.mu
-    prob.variables.add(obj=lin_obj, lb=np.zeros(G.m), ub=G.cap, names=x_names)
+        with mf.Model() as model:
 
-    prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
-    prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
+            x = model.variable("x", G.m, mf.Domain.greaterThan(0.0))
+            x_n = model.variable("x_n", G.m)
+            decoy = model.variable("decoy", 1)
+            decoy_2 = mf.Var.vstack(decoy, x_n)
+            model.objective("myobj",
+                            mf.ObjectiveSense.Minimize,
+                            mf.Expr.add(mf.Expr.dot(G.mu, x), mf.Expr.mul(lambar, decoy)))
+            model.constraint(mf.Expr.sub(x_n, mf.Expr.mulElm(np.sqrt(G.var), x)),
+                             mf.Domain.equalsTo(0.0))
+            model.constraint(x, mf.Domain.lessThan(G.cap))
+            model.constraint(decoy_2, mf.Domain.inQCone())
+            model.constraint(mf.Expr.sub(mf.Expr.mul(G.A_msk, x), G.b), mf.Domain.equalsTo(0.0))
 
-    prob.objective.set_sense(prob.objective.sense.minimize)
+            model.setSolverParam("intpntCoTolRelGap", 1.0e-10)
+            model.setSolverParam("intpntCoTolPfeas", 1.0e-11)
+            model.setSolverParam("intpntCoTolDfeas", 1.0e-11)
+            model.setSolverParam("intpntCoTolMuRed", 1.0e-11)
+            model.setSolverParam("intpntMaxIterations", 100000)
 
-    decoy_name = ['decoy']
-    decoyvar = prob.variables.add(obj=[G.lambar], lb=[0], names=decoy_name)
+            import logging
+            log_path = os.path.join(EXPERIMENT_PATH, 'mosek')
+            log_path = os.path.join(log_path, run_name)
 
-    qc_names_prepped = decoy_name + x_names
-    qc_rhs_prepped = [-1.0]
-    qc_rhs_prepped.extend(G.var)
+            logging = Logger(run_dir=log_path)
+            model.setLogHandler(logging)
+            model.setSolverParam("logIntpnt", 1000)
+            model.setSolverParam("log", 1000)
+            model.setSolverParam("logFile", 1000)
+            model.solve()
 
-    prob.quadratic_constraints.add(quad_expr=[qc_names_prepped,
-                                              qc_names_prepped,
-                                              qc_rhs_prepped],
-                                   sense='L',
-                                   rhs=0,
-                                   name='q1')
-    cplex_log = "cplex_log.txt"
-    prob.set_log_stream(cplex_log)
-    prob.set_error_stream(cplex_log)
-    prob.set_warning_stream(cplex_log)
-    prob.set_results_stream(cplex_log)
-    prob.parameters.barrier.display.set(2)
-    # prob.parameters.barrier.qcpconvergetol.set(1e-9)
-    # prob.parameters.barrier.algorithm.set(1)
-    # prob.parameters.barrier.limits.corrections.set(50)
+            obj = model.primalObjValue()
+            x = x.level()
+            # mean_cost = G.mu.dot(x)
+            # var_cost = G.var.dot(x)
+            elapsed = time.time() - start
 
-    prob.solve()
-
-    obj = prob.solution.get_objective_value()
-    soln = np.array(prob.solution.get_values())
-
-    m = prob.solution.quality_metric
-    max_x, max_infeas = prob.solution.get_float_quality(
-        [m.max_x, m.max_primal_infeasibility])
-
-    elapsed = time.time() - start
-
-    return obj, elapsed, soln, max_infeas
+            return obj, elapsed, x, None
 
 
-def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', bound_lam=False):
+    if cvxpy:
+        x = cp.Variable(G.m)
+        constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
+        objective = cp.Minimize(G.mu.T * x + G.lambar*cp.norm(cp.multiply(np.sqrt(G.var), x), 2))
+        prob = cp.Problem(objective, constraints)
 
-    start = time.time()
+        # result = prob.solve(solver=solver, verbose=True)  # gurobi mosek compare
 
-    if not warm_start:
+        result = prob.solve(solver='MOSEK', verbose=False, mosek_params={'MSK_IPAR_LOG_INTPNT':2,'MSK_DPAR_INTPNT_QO_TOL_REL_GAP':1e-14, 'MSK_DPAR_INTPNT_CO_TOL_MU_RED':1e-12, 'MSK_DPAR_INTPNT_CO_TOL_PFEAS':1e-12, 'MSK_DPAR_INTPNT_CO_TOL_REL_GAP':1e-12,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-12,'MSK_IPAR_INTPNT_MAX_ITERATIONS':10000})
+        
+        cvx_soln = x.value
+        cvx_obj = objective.value
+
+        # print(prob.solver_stats.solve_time, prob.solver_stats.setup_time)
+        cvx_elapsed = prob.solver_stats.solve_time
+        elapsed = time.time() - start
+
+        return cvx_obj, elapsed, cvx_soln, None
+
+    else:
+
         prob = cplex.Cplex()
-        if lp:
-            if bound_lam:
-                obj = np.sqrt(G.var)
-            else:
-                obj = (G.mu + lam)
-            prob.variables.add(obj=obj, lb=np.zeros(G.m), ub=G.cap)
-        else:
-            prob.variables.add(lb=np.zeros(G.m), ub=G.cap)
 
-            if not bound_lam:
-                prob.objective.set_linear([(int(i), j)
-                                           for i, j in zip(np.arange(G.m), G.mu)])
-                var = lam * np.array(G.var) * 2.0
-
-            else:
-                var = np.array(G.var)
-
-            prob.objective.set_quadratic(var)
+        x_names = ['x' + str(i) for i in range(G.m)]
+        lin_obj = G.mu
+        prob.variables.add(obj=lin_obj, lb=np.zeros(G.m), ub=G.cap, names=x_names)
 
         prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
         prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
 
         prob.objective.set_sense(prob.objective.sense.minimize)
-        prob.set_log_stream(None)
-        prob.set_error_stream(None)
-        prob.set_warning_stream(None)
-        prob.set_results_stream(None)
-        prob.parameters.barrier.display.set(0)
 
-    else:
-        if lp:
-            if bound_lam:
-                coef = G.var
-            else:
-                coef = (G.mu + lam)
-            prob.objective.set_linear([(int(i), j)
-                                       for i, j in zip(np.arange(G.m), coef)])
-        else:
-            var = lam * np.array(G.var) * 2.0
-            prob.objective.set_quadratic(var)
+        decoy_name = ['decoy']
+        decoyvar = prob.variables.add(obj=[G.lambar], lb=[0], names=decoy_name)
 
-    prob.solve()
+        qc_names_prepped = decoy_name + x_names
+        qc_rhs_prepped = [-1.0]
+        qc_rhs_prepped.extend(G.var)
 
-    obj = prob.solution.get_objective_value()
-    soln = np.array(prob.solution.get_values())
+        prob.quadratic_constraints.add(quad_expr=[qc_names_prepped,
+                                                  qc_names_prepped,
+                                                  qc_rhs_prepped],
+                                       sense='L',
+                                       rhs=0,
+                                       name='q1')
+        cplex_log = "cplex_log.txt"
+        prob.set_log_stream(cplex_log)
+        prob.set_error_stream(cplex_log)
+        prob.set_warning_stream(cplex_log)
+        prob.set_results_stream(cplex_log)
+        prob.parameters.barrier.display.set(2)
+        prob.parameters.barrier.qcpconvergetol.set(1e-12)
+        # prob.parameters.barrier.algorithm.set(1)
+        # prob.parameters.barrier.limits.corrections.set(100)
 
-    elapsed = time.time() - start
+        prob.solve()
 
-    m = prob.solution.quality_metric
-    max_x, max_infeas = prob.solution.get_float_quality(
-        [m.max_x, m.max_primal_infeasibility])
+        obj = prob.solution.get_objective_value()
+        soln = np.array(prob.solution.get_values())
 
-    return obj, elapsed, soln, prob, max_infeas
+        m = prob.solution.quality_metric
+        max_x, max_infeas = prob.solution.get_float_quality(
+            [m.max_x, m.max_primal_infeasibility])
+
+        elapsed = time.time() - start
+
+        return obj, elapsed, soln, max_infeas
 
 
-def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', iters=0):
+def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', bound_lam=False, cvxpy=False):
+
 
     start = time.time()
 
-    diff = soln - G.cap
-    x_ = soln
-    x_zero = np.argwhere(abs(soln) < 1e-6).ravel().astype(int)
-    x_nonzero = np.argwhere(soln > 1e-6).ravel().astype(int)
-    x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
-    x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
-
-    diff_ = G.cap[x_btw] - x_[x_btw]
-    b = np.r_[np.zeros(len(x_zero)), np.zeros(
-        len(x_u)), -x_[x_u], diff_, -x_[x_btw]]
-    names = [str(i) + 'S' for i in range(len(b))]
-
-    cols = np.r_[x_zero, x_u, x_u, x_btw, x_btw]
-    senses = np.r_[['E'] * len(x_zero), ['L'] * len(x_u), ['G']
-                   * len(x_u), ['L'] * len(x_btw), ['G'] * len(x_btw)]
-    rows = np.arange(len(cols))
-    values = np.ones(len(rows))
-
-    if not warm_start:
-
-        prob = cplex.Cplex()
+    if cvxpy:
+        start = time.time()
+        x = cp.Variable(G.m)
+        constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
         if lp:
-            obj = np.ones(G.m)
-            prob.variables.add(obj=obj, lb=-np.inf * np.ones(G.m), ub=G.cap)
+            objective = cp.Minimize(G.mu*x)
+
+        elif bound_lam:
+            objective = cp.Minimize(G.var*x**2)
+
         else:
-            prob.variables.add(lb=-np.inf * np.ones(G.m), ub=G.cap)
-            lin_coeffs = 2 * G.var * x_
-            quad_coeffs = lam * G.var * 2
-            prob.objective.set_linear(
-                [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
-            prob.objective.set_quadratic(quad_coeffs)
+            objective = cp.Minimize(G.mu.T*x + lam*G.var*x**2)
 
-        prob.linear_constraints.add(rhs=np.zeros(G.n), senses='E' * G.n)
-        prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
+        prob = cp.Problem(objective, constraints)
 
-        prob.linear_constraints.add(rhs=b, names=names, senses=senses)
-        prob.linear_constraints.set_coefficients(
-            zip([int(i) for i in rows], [int(i) for i in cols], values))
+        result = prob.solve(solver='MOSEK', verbose=False)
+        cvx_soln = x.value
+        cvx_obj = objective.value
 
-        prob.objective.set_sense(prob.objective.sense.minimize)
-        prob.set_log_stream(None)
-        prob.set_error_stream(None)
-        prob.set_warning_stream(None)
-        prob.set_results_stream(None)
-        prob.parameters.barrier.display.set(0)
+        cvx_elapsed = prob.solver_stats.solve_time
+        elapsed = time.time() - start
+
+        return cvx_obj, elapsed, cvx_soln, None, None
+
     else:
 
-        prob.linear_constraints.delete(
-            G.n, prob.linear_constraints.get_num() - 1)
-        prob.linear_constraints.add(rhs=b, names=names, senses=senses)
-        prob.linear_constraints.set_coefficients(
-            zip([int(i) for i in rows], [int(i) for i in cols], values))
+        if not warm_start:
+            prob = cplex.Cplex()
+            if lp:
+                if bound_lam:
+                    obj = np.sqrt(G.var)
+                else:
+                    obj = (G.mu + lam)
+                prob.variables.add(obj=obj, lb=np.zeros(G.m), ub=G.cap)
+            else:
+                prob.variables.add(lb=np.zeros(G.m), ub=G.cap)
 
-        if not lp:
-            lin_coeffs = 2 * G.var * x_
-            quad_coeffs = lam * G.var * 2
-            prob.objective.set_linear(
-                [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
-            prob.objective.set_quadratic(quad_coeffs)
+                if not bound_lam:
+                    prob.objective.set_linear([(int(i), j)
+                                               for i, j in zip(np.arange(G.m), G.mu)])
+                    var = lam * np.array(G.var) * 2.0
 
-    prob.solve()
+                else:
+                    var = np.array(G.var)
 
-    obj = prob.solution.get_objective_value()
-    soln = np.array(prob.solution.get_values())
+                prob.objective.set_quadratic(var)
 
-    elapsed = time.time() - start
+            prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
+            prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
 
-    m = prob.solution.quality_metric
-    max_x, max_infeas = prob.solution.get_float_quality(
-        [m.max_x, m.max_primal_infeasibility])
+            prob.objective.set_sense(prob.objective.sense.minimize)
+            prob.set_log_stream(None)
+            prob.set_error_stream(None)
+            prob.set_warning_stream(None)
+            prob.set_results_stream(None)
+            prob.parameters.barrier.display.set(0)
 
-    return elapsed, soln, prob, max_infeas
+        else:
+            if lp:
+                if bound_lam:
+                    coef = G.var
+                else:
+                    coef = (G.mu + lam)
+                prob.objective.set_linear([(int(i), j)
+                                           for i, j in zip(np.arange(G.m), coef)])
+            else:
+                var = lam * np.array(G.var) * 2.0
+                prob.objective.set_quadratic(var)
+
+        prob.solve()
+
+        obj = prob.solution.get_objective_value()
+        soln = np.array(prob.solution.get_values())
+
+        elapsed = time.time() - start
+
+        m = prob.solution.quality_metric
+        max_x, max_infeas = prob.solution.get_float_quality(
+            [m.max_x, m.max_primal_infeasibility])
+
+        return obj, elapsed, soln, prob, max_infeas
 
 
-def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, test=False, solver_weird=False):
+def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', iters=0, cvxpy=False):
+
+    start = time.time()
+
+    if cvxpy:
+
+        xi = cp.Variable(G.m)
+        x_ = soln
+        constraints = [G.A@xi==0, -x_<=xi, xi<=G.cap]
+
+        diff = x_ - G.cap
+        x_zero = np.argwhere(abs(x_) < 1e-6).ravel().astype(int)
+        x_nonzero = np.argwhere(x_ > 1e-6).ravel().astype(int)
+        x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
+        x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
+        diff_ = G.cap[x_btw] - x_[x_btw]
+
+        # if len(x_zero) > 0:
+            # constraints.append(xi[x_zero] == np.zeros(len(x_zero)))
+        
+        if len(x_u) > 0:
+            constraints.append(xi[x_u] <= np.zeros(len(x_u)))
+            constraints.append(xi[x_u] >= -x_[x_u])
+        
+        if len(x_btw) > 0:
+            constraints.append(xi[x_btw] <= diff_)
+            constraints.append(xi[x_btw] >= -x_[x_btw])
+
+        objective = cp.Minimize(G.lam*G.var.T*cp.square(xi) + 2*np.multiply(G.var,x_).T*xi)
+        prob = cp.Problem(objective, constraints)
+
+        result = prob.solve(solver='MOSEK', verbose=False)
+        cvx_soln = xi.value
+        cvx_obj = objective.value
+
+        cvx_elapsed = prob.solver_stats.solve_time
+        elapsed = time.time() - start
+        return elapsed, cvx_soln, None, None
+    else:
+
+        diff = soln - G.cap
+        x_ = soln
+        x_zero = np.argwhere(abs(soln) < 1e-6).ravel().astype(int)
+        x_nonzero = np.argwhere(soln > 1e-6).ravel().astype(int)
+        x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
+        x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
+
+        diff_ = G.cap[x_btw] - x_[x_btw]
+        b = np.r_[np.zeros(len(x_zero)), np.zeros(
+            len(x_u)), -x_[x_u], diff_, -x_[x_btw]]
+        names = [str(i) + 'S' for i in range(len(b))]
+
+        cols = np.r_[x_zero, x_u, x_u, x_btw, x_btw]
+        senses = np.r_[['E'] * len(x_zero), ['L'] * len(x_u), ['G']
+                       * len(x_u), ['L'] * len(x_btw), ['G'] * len(x_btw)]
+        rows = np.arange(len(cols))
+        values = np.ones(len(rows))
+
+        if not warm_start:
+
+            prob = cplex.Cplex()
+            if lp:
+                obj = np.ones(G.m)
+                prob.variables.add(obj=obj, lb=-x_ * np.ones(G.m), ub=G.cap)
+            else:
+                prob.variables.add(lb=-np.inf * np.ones(G.m), ub=G.cap)
+                lin_coeffs = 2 * G.var * x_
+                quad_coeffs = lam * G.var * 2
+                prob.objective.set_linear(
+                    [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
+                prob.objective.set_quadratic(quad_coeffs)
+
+            prob.linear_constraints.add(rhs=np.zeros(G.n), senses='E' * G.n)
+            prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
+
+            prob.linear_constraints.add(rhs=b, names=names, senses=senses)
+            prob.linear_constraints.set_coefficients(
+                zip([int(i) for i in rows], [int(i) for i in cols], values))
+
+            prob.objective.set_sense(prob.objective.sense.minimize)
+            prob.set_log_stream(None)
+            prob.set_error_stream(None)
+            prob.set_warning_stream(None)
+            prob.set_results_stream(None)
+            prob.parameters.barrier.display.set(0)
+        else:
+
+            prob.linear_constraints.delete(
+                G.n, prob.linear_constraints.get_num() - 1)
+            prob.linear_constraints.add(rhs=b, names=names, senses=senses)
+            prob.linear_constraints.set_coefficients(
+                zip([int(i) for i in rows], [int(i) for i in cols], values))
+
+            if not lp:
+                lin_coeffs = 2 * G.var * x_
+                quad_coeffs = lam * G.var * 2
+                prob.objective.set_linear(
+                    [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
+                prob.objective.set_quadratic(quad_coeffs)
+
+        prob.solve()
+
+        obj = prob.solution.get_objective_value()
+        soln = np.array(prob.solution.get_values())
+
+        elapsed = time.time() - start
+
+        m = prob.solution.quality_metric
+        max_x, max_infeas = prob.solution.get_float_quality(
+            [m.max_x, m.max_primal_infeasibility])
+
+        return elapsed, soln, prob, max_infeas
+
+
+def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy=False):
     print('bsc')
 
-    # test
-    test = test
-    if test:
-        warm_start = False
-        for i in np.linspace(low, high / 2, 300):
-            lam = i
-            obj_, elapsed, x, prob = cvxpy_solve_additive(
-                G, lam, prob=prob, warm_start=warm_start, lp=lp, bound_lam=False)
-            var_cost = np.multiply(G.var, x).dot(x)
-            obj = G.mu.dot(x) + G.lambar * (np.sqrt(var_cost))
-
-            f1 = lam - G.lambar / (2.0 * np.sqrt(var_cost))
-            f2 = lam - G.lambar / np.sqrt(var_cost)
-
-            t = PrettyTable(['lam_obj', 'lambar_obj', 'time',
-                             'derivative_eq', 'func_eq', 'lambda'])
-            t.add_row([obj_, obj, time.time() - start, f1, f2, lam])
-            print(t)
-
-            if abs(f1) < 1e-1 or abs(f2) < 1e-1:
-                print('now debug')
-                print(f1, f2, obj_, obj)
-                pdb.set_trace()
-
-        pdb.set_trace()
     start = time.time()
 
     stop_tol = 1e-6
@@ -293,7 +370,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, test=False, solver_weird=
 
         lams.append(mid)
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
-            G, mid, prob=prob, warm_start=warm_start, lp=lp)
+            G, mid, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy)
 
         infeas.append(max_infeas)
         var_cost = np.multiply(G.var, x).dot(x)
@@ -341,11 +418,15 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, test=False, solver_weird=
             break
 
     elapsed = time.time() - start
-    infeas = np.array(infeas)
-    return obj, elapsed, x, iter_objs, iter_elapsed, infeas.mean(), lams, fs
+    if cvxpy:
+        return obj, elapsed, x, iter_objs, iter_elapsed, None, lams, fs
+
+    else:
+        infeas = np.array(infeas)
+        return obj, elapsed, x, iter_objs, iter_elapsed, infeas.mean(), lams, fs
 
 
-def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird=False):
+def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird=False, cvxpy=False):
     print('nr')
     start = time.time()
     stop_tol = 1e-6
@@ -391,7 +472,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         lams.append(lam)
 
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
-            G, lam, prob=prob, warm_start=warm_start, lp=lp)
+            G, lam, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy)
         iter_var_times.append(elapsed)
         infeas.append(max_infeas)
         var_cost = np.multiply(G.var, x).dot(x)
@@ -428,7 +509,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         #             break
 
         elapsed_xi, xi, prob_xi, max_infeas = cvxpy_solve_xi(
-            G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters)
+            G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters, cvxpy=cvxpy)
         iter_xi_times.append(elapsed_xi)
         infeas.append(max_infeas)
 
@@ -450,10 +531,14 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         if iters > 5:
             break
 
-    infeas = np.array(infeas)
-
     elapsed = time.time() - start
-    return obj, elapsed, x, iter_objs, iter_elapsed, iter_xi_times, iter_var_times, mean, var,  infeas.mean(), lams, fs
+
+    if cvxpy:
+        return obj, elapsed, x, iter_objs, iter_elapsed, iter_xi_times, iter_var_times, mean, var,  None, lams, fs
+
+    else:
+        infeas = np.array(infeas)
+        return obj, elapsed, x, iter_objs, iter_elapsed, iter_xi_times, iter_var_times, mean, var,  infeas.mean(), lams, fs
 
 
 def plot_flam(G, answer):
@@ -730,7 +815,7 @@ def small_test_case():
         pdb.set_trace()
 
 
-def graph_family_experiment(networks, lambar, record=True):
+def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=False):
     experiment = 'graph_families'
 
     for network in networks:
@@ -754,11 +839,8 @@ def graph_family_experiment(networks, lambar, record=True):
             '/' + network[:network.find('.')] + "_cplex_results"
 
         if not os.path.isfile(os.path.join(EXPERIMENT_PATH, cplex_saved) + '.pickle'):
-            # print('mosek in progress..')
-            # import cvxpy as cp
-            # solver_obj, solver_elapsed, soln = cvxpy_any(G, solver='MOSEK')
+            solver_obj, solver_elapsed, solver_soln, solver_infeas = cvxpy_solve(G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
 
-            solver_obj, solver_elapsed, solver_soln, solver_infeas = cvxpy_solve(G)
         else:
             filename = cplex_saved
             data_dic = load_run(filename)
@@ -768,44 +850,54 @@ def graph_family_experiment(networks, lambar, record=True):
 
         print('Solver finished in {} seconds, with objective {}'.format(
             solver_elapsed, solver_obj))
+        
+        cvxpy_alg = cvxpy
 
-        # getting bounds:
-        _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(G, lam=0, lp=True)
+        _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(G, lam=0, lp=True, cvxpy=cvxpy_alg)
         var_cost = np.multiply(G.var, soln).dot(soln)
         lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
 
-        lam_high = G.lambar / 2.0
+        _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
+            G, lam=0, lp=False, bound_lam=True, cvxpy=cvxpy_alg)
+        var_cost = np.multiply(G.var, soln).dot(soln)
+        lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+
+        bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
+            G, lp=False, low=lam_low, high=lam_high, cvxpy=cvxpy_alg)
+
+        bs_elapsed += lb_elapsed + ub_elapsed
+        print('BSC finished in {} seconds, with objective {}'.format(
+            bs_elapsed, bs_obj))
 
         nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
-            G, lp=False, low=lam_low, high=lam_high, lam_init=lam_low)
+            G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low, cvxpy=cvxpy_alg)
 
         nr_elapsed += lb_elapsed
 
         print('NR finished in {} seconds, with objective {}'.format(
             nr_elapsed, nr_obj))
 
-        _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
-            G, lam=0, lp=False, bound_lam=True)
-        var_cost = np.multiply(G.var, soln).dot(soln)
-        lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
 
-        bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
-            G, lp=False, low=lam_low, high=lam_high)
+        if cvxpy:
+            t = PrettyTable(['Method', 'Soln Time',
+                             '# Iters', 'Obj', 'Rel_Gap'])
+            t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
+                       solver_obj, '-'])
+            t.add_row(['NR', round(nr_elapsed, 2), len(nr_iter_elapsed),
+                       nr_obj, abs(solver_obj - nr_obj) / nr_obj])
+            t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
+                solver_obj - bs_obj) / bs_obj])
+        else:
+            t = PrettyTable(['Method', 'Soln Time',
+                             '# Iters', 'Obj', 'Rel_Gap', 'Infeas'])
+            t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
+                       solver_obj, '-', round(solver_infeas, 3)])
+            t.add_row(['NR', round(nr_elapsed, 2), len(nr_iter_elapsed),
+                       nr_obj, abs(solver_obj - nr_obj) / nr_obj, round(nr_avg_infeas, 3)])
+            t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
+                solver_obj - bs_obj) / bs_obj, round(bs_avg_infeas, 3)])
 
-        bs_elapsed += lb_elapsed + ub_elapsed
-        print('BSC finished in {} seconds, with objective {}'.format(
-            bs_elapsed, bs_obj))
-
-        t = PrettyTable(['Method', 'Soln Time',
-                         '# Iters', 'Obj', 'Rel_Gap', 'Infeas'])
-        t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
-                   solver_obj, '-', round(solver_infeas, 3)])
-        t.add_row(['NR', round(nr_elapsed, 2), len(nr_iter_elapsed),
-                   nr_obj, abs(solver_obj - nr_obj) / nr_obj, round(nr_avg_infeas, 3)])
-        t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
-            solver_obj - bs_obj) / bs_obj, round(bs_avg_infeas, 3)])
         print(t)
-        pdb.set_trace()
         if record:
 
             solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
@@ -825,9 +917,14 @@ def graph_family_experiment(networks, lambar, record=True):
 
             if not os.path.isfile(cplex_saved):
                 os.makedirs(cplex_saved, exist_ok=True)
-                save_run(cplex_saved, run_dict)
-
-            save_run(run_name, run_dict)
+                if cvxpy:
+                    save_run(cplex_saved, run_dict, prefix='mosek')
+                else:
+                    save_run(cplex_saved, run_dict)
+            if cvxpy:
+                save_run(run_name, run_dict, prefix='mosek')
+            else:
+                save_run(run_name, run_dict)
 
 
 def varying_lambda_experiment(networks, lambars, record=True):
@@ -994,44 +1091,62 @@ if test:
     graph_family_experiment(networks, lambar, record=False)
 
 
-lambar = 10
-tails = ['a.min']
-exponents = ['12']
-types = ['_sr_']
-experiment = 'graph_families'
-networks = get_networks(experiment, tails, exponents, types)
-print(networks)
-graph_family_experiment(networks, lambar)
-
-#### check the output log for above^
-
-
-# print('starting lambar experiments')
-# lambars = [0.001, 0.1, 10, 1000]
-# tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
-# exponents = ['11']
-# types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
-# experiment = 'varying_lambar'
-# networks = get_networks(experiment, tails, exponents, types)
-# varying_lambda_experiment(networks, lambars)
-
-
-# print('starting graph family experiments for exponent 14')
-# tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
-# exponents = (np.arange(10, 15)).astype(str)
-# types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+# lambar = 10
+# tails = ['a.min']
+# exponents = ['12']
+# types = ['_sr_']
 # experiment = 'graph_families'
 # networks = get_networks(experiment, tails, exponents, types)
-# lambar = 10
+# print(networks)
 # graph_family_experiment(networks, lambar)
 
 
-# print('starting base vs reliable experiments')
-# lambars = [0.1, 10, 1000]
-# exponents = ['11']
-# types = ['_sr_', '_8_']
-# tails = ['a.min']
-# experiment = 'base_vs_reliable'
-# networks = get_networks(experiment, tails, exponents, types)
-# base_vs_reliable_expr(networks, lambars)
+
+cvxpy = False
+fusion = False
+
+# if cvxpy:
+#     import cvxpy as cp
+if fusion:
+    import mosek.fusion as mf
+else:
+    import cplex
+
+lambar = 10
+tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
+exponents = (np.arange(10, 15)).astype(str)
+types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+experiment = 'graph_families'
+networks = get_networks(experiment, tails, exponents, types)
+graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+
+
+print('starting lambar experiments')
+lambars = [0.001, 0.1, 10, 1000]
+tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
+exponents = ['12']
+types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+experiment = 'varying_lambar'
+networks = get_networks(experiment, tails, exponents, types)
+varying_lambda_experiment(networks, lambars)
+
+
+lambar = 10
+tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
+exponents = (np.arange(10, 16)).astype(str)
+types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+experiment = 'graph_families'
+networks = get_networks(experiment, tails, exponents, types)
+graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+
+
+
+print('starting base vs reliable experiments')
+lambars = [0.1, 10, 1000]
+exponents = ['12']
+types = ['_sr_', '_8_']
+tails = ['a.min']
+experiment = 'base_vs_reliable'
+networks = get_networks(experiment, tails, exponents, types)
+base_vs_reliable_expr(networks, lambars)
 
