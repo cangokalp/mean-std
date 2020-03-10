@@ -206,10 +206,12 @@ def load_data(networkFileName, G, generator='netgen'):
                 u = int(data[1])
                 v = int(data[2])
 
-                mu[i] = float(data[5]) #/ 100.0
+                mu[i] = float(data[5])
+
                 # if mu[i] == 0:
                 #     mu[i] = np.random.uniform(
                 #         max_arc_cost / 4.0, max_arc_cost / 1.5)
+
                 cov_coef = np.random.uniform(0.15, 0.3)
                 sigma = mu[i] * cov_coef
                 var[i] = sigma**2

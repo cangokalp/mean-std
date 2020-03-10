@@ -12,9 +12,51 @@ import pstats
 # import graph_tool as gt
 from prettytable import PrettyTable
 import caffeine
+from cplex.callbacks import BarrierCallback
 
 
-def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
+class TimeLimit_LoggingCallback(BarrierCallback):
+
+    def __call__(self):
+        self.duals.append(self.get_dual_objective_value())
+        self.primals.append(self.get_objective_value())
+        self.is_feasible.append(self.is_primal_feasible())
+        self.primal_infeas.append(self.get_primal_infeasibility())
+        timeused = self.get_time() - self.starttime
+        self.iter_times.append(timeused)
+
+        dual = self.get_dual_objective_value()
+        primal = self.get_objective_value()
+
+        if self.is_primal_feasible():
+            print('feasible')
+            self.feasible_primal.append(primal)
+            self.feasible_dual.append(dual)
+            rel_gap = abs(dual - primal) / primal
+            if rel_gap < self.acceptablegap:
+                print('dual: ', dual)
+                print('primal: ', primal)
+                self.aborted = 1
+                self.abort()
+
+
+class TimeLimitCallback(BarrierCallback):
+
+    def __call__(self):
+
+        dual = self.get_dual_objective_value()
+        primal = self.get_objective_value()
+
+        if self.is_primal_feasible():
+            rel_gap = abs(dual - primal) / primal
+            if rel_gap < self.acceptablegap:
+                # print('dual: ', dual)
+                # print('primal: ', primal)
+                self.aborted = 1
+                self.abort()
+
+
+def cvxpy_solve(G, cvxpy=False, fusion=False, run_name='.', acceptablegap=1e-8):
     start = time.time()
 
     if fusion:
@@ -33,12 +75,13 @@ def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
                              mf.Domain.equalsTo(0.0))
             model.constraint(x, mf.Domain.lessThan(G.cap))
             model.constraint(decoy_2, mf.Domain.inQCone())
-            model.constraint(mf.Expr.sub(mf.Expr.mul(G.A_msk, x), G.b), mf.Domain.equalsTo(0.0))
+            model.constraint(mf.Expr.sub(mf.Expr.mul(
+                G.A_msk, x), G.b), mf.Domain.equalsTo(0.0))
 
-            model.setSolverParam("intpntCoTolRelGap", 1.0e-10)
-            model.setSolverParam("intpntCoTolPfeas", 1.0e-11)
-            model.setSolverParam("intpntCoTolDfeas", 1.0e-11)
-            model.setSolverParam("intpntCoTolMuRed", 1.0e-11)
+            model.setSolverParam("intpntCoTolRelGap", 1.0e-8)
+            model.setSolverParam("intpntCoTolPfeas", 1.0e-8)
+            model.setSolverParam("intpntCoTolDfeas", 1.0e-8)
+            model.setSolverParam("intpntCoTolMuRed", 1.0e-8)
             model.setSolverParam("intpntMaxIterations", 100000)
 
             import logging
@@ -57,20 +100,23 @@ def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
             # mean_cost = G.mu.dot(x)
             # var_cost = G.var.dot(x)
             elapsed = time.time() - start
-
+            print(obj, elapsed)
+            pdb.set_trace()
             return obj, elapsed, x, None
-
 
     if cvxpy:
         x = cp.Variable(G.m)
         constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
-        objective = cp.Minimize(G.mu.T * x + G.lambar*cp.norm(cp.multiply(np.sqrt(G.var), x), 2))
+        objective = cp.Minimize(
+            G.mu.T * x + G.lambar * cp.norm(cp.multiply(np.sqrt(G.var), x), 2))
         prob = cp.Problem(objective, constraints)
 
-        # result = prob.solve(solver=solver, verbose=True)  # gurobi mosek compare
+        # result = prob.solve(solver=solver, verbose=True)  # gurobi mosek
+        # compare
 
-        result = prob.solve(solver='MOSEK', verbose=False, mosek_params={'MSK_IPAR_LOG_INTPNT':2,'MSK_DPAR_INTPNT_QO_TOL_REL_GAP':1e-14, 'MSK_DPAR_INTPNT_CO_TOL_MU_RED':1e-12, 'MSK_DPAR_INTPNT_CO_TOL_PFEAS':1e-12, 'MSK_DPAR_INTPNT_CO_TOL_REL_GAP':1e-12,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-12,'MSK_IPAR_INTPNT_MAX_ITERATIONS':10000})
-        
+        result = prob.solve(solver='MOSEK', verbose=False, mosek_params={'MSK_IPAR_LOG_INTPNT': 2, 'MSK_DPAR_INTPNT_QO_TOL_REL_GAP': 1e-14, 'MSK_DPAR_INTPNT_CO_TOL_MU_RED': 1e-12,
+                                                                         'MSK_DPAR_INTPNT_CO_TOL_PFEAS': 1e-12, 'MSK_DPAR_INTPNT_CO_TOL_REL_GAP': 1e-12, 'MSK_DPAR_INTPNT_CO_TOL_INFEAS': 1e-12, 'MSK_IPAR_INTPNT_MAX_ITERATIONS': 10000})
+
         cvx_soln = x.value
         cvx_obj = objective.value
 
@@ -83,10 +129,23 @@ def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
     else:
 
         prob = cplex.Cplex()
+        cplex_cb = prob.register_callback(TimeLimit_LoggingCallback)
+        cplex_cb.acceptablegap = acceptablegap
+        cplex_cb.aborted = 0
+        cplex_cb.starttime = prob.get_time()
+
+        cplex_cb.duals = []
+        cplex_cb.primals = []
+        cplex_cb.is_feasible = []
+        cplex_cb.primal_infeas = []
+        cplex_cb.iter_times = []
+        cplex_cb.feasible_dual = []
+        cplex_cb.feasible_primal = []
 
         x_names = ['x' + str(i) for i in range(G.m)]
         lin_obj = G.mu
-        prob.variables.add(obj=lin_obj, lb=np.zeros(G.m), ub=G.cap, names=x_names)
+        prob.variables.add(obj=lin_obj, lb=np.zeros(G.m),
+                           ub=G.cap, names=x_names)
 
         prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
         prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
@@ -113,10 +172,12 @@ def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
         prob.set_results_stream(cplex_log)
         prob.parameters.barrier.display.set(2)
         prob.parameters.barrier.qcpconvergetol.set(1e-12)
-        # prob.parameters.barrier.algorithm.set(1)
+        # prob.parameters.barrier.algorithm.set(2)
         # prob.parameters.barrier.limits.corrections.set(100)
 
         prob.solve()
+        sol = prob.solution
+
 
         obj = prob.solution.get_objective_value()
         soln = np.array(prob.solution.get_values())
@@ -126,12 +187,17 @@ def cvxpy_solve(G, cvxpy=False, fusion=True, run_name='.'):
             [m.max_x, m.max_primal_infeasibility])
 
         elapsed = time.time() - start
+        status = sol.status[sol.get_status()]
+        if status != 'optimal' and status != 'abort_user' and status != 'num_best':
+            pdb.set_trace()
 
-        return obj, elapsed, soln, max_infeas
+        cplex_cb.primals.append(obj)
+        cplex_cb.iter_times.append(elapsed)
+        feasible = prob.solution.is_primal_feasible()
+        return status, feasible, obj, elapsed, soln, max_infeas, cplex_cb.duals, cplex_cb.primals, cplex_cb.is_feasible, cplex_cb.primal_infeas, cplex_cb.iter_times, cplex_cb.feasible_dual, cplex_cb.feasible_primal
 
 
-def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', bound_lam=False, cvxpy=False):
-
+def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', bound_lam=False, cvxpy=False, acceptablegap=1e-6):
 
     start = time.time()
 
@@ -140,13 +206,13 @@ def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='
         x = cp.Variable(G.m)
         constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
         if lp:
-            objective = cp.Minimize(G.mu*x)
+            objective = cp.Minimize(G.mu * x)
 
         elif bound_lam:
-            objective = cp.Minimize(G.var*x**2)
+            objective = cp.Minimize(G.var * x**2)
 
         else:
-            objective = cp.Minimize(G.mu.T*x + lam*G.var*x**2)
+            objective = cp.Minimize(G.mu.T * x + lam * G.var * x**2)
 
         prob = cp.Problem(objective, constraints)
 
@@ -183,7 +249,8 @@ def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='
                 prob.objective.set_quadratic(var)
 
             prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
-            prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
+            prob.linear_constraints.set_coefficients(
+                zip(G.rows, G.cols, G.values))
 
             prob.objective.set_sense(prob.objective.sense.minimize)
             prob.set_log_stream(None)
@@ -204,6 +271,10 @@ def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='
                 var = lam * np.array(G.var) * 2.0
                 prob.objective.set_quadratic(var)
 
+        timelim_cb = prob.register_callback(TimeLimitCallback)
+        timelim_cb.acceptablegap = acceptablegap
+        timelim_cb.aborted = 0
+
         prob.solve()
 
         obj = prob.solution.get_objective_value()
@@ -218,7 +289,7 @@ def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='
         return obj, elapsed, soln, prob, max_infeas
 
 
-def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', iters=0, cvxpy=False):
+def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', iters=0, cvxpy=False, acceptablegap=1e-6):
 
     start = time.time()
 
@@ -226,7 +297,7 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
 
         xi = cp.Variable(G.m)
         x_ = soln
-        constraints = [G.A@xi==0, -x_<=xi, xi<=G.cap]
+        constraints = [G.A@xi == 0, -x_ <= xi, xi <= G.cap]
 
         diff = x_ - G.cap
         x_zero = np.argwhere(abs(x_) < 1e-6).ravel().astype(int)
@@ -236,17 +307,18 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
         diff_ = G.cap[x_btw] - x_[x_btw]
 
         # if len(x_zero) > 0:
-            # constraints.append(xi[x_zero] == np.zeros(len(x_zero)))
-        
+        # constraints.append(xi[x_zero] == np.zeros(len(x_zero)))
+
         if len(x_u) > 0:
             constraints.append(xi[x_u] <= np.zeros(len(x_u)))
             constraints.append(xi[x_u] >= -x_[x_u])
-        
+
         if len(x_btw) > 0:
             constraints.append(xi[x_btw] <= diff_)
             constraints.append(xi[x_btw] >= -x_[x_btw])
 
-        objective = cp.Minimize(G.lam*G.var.T*cp.square(xi) + 2*np.multiply(G.var,x_).T*xi)
+        objective = cp.Minimize(
+            G.lam * G.var.T * cp.square(xi) + 2 * np.multiply(G.var, x_).T * xi)
         prob = cp.Problem(objective, constraints)
 
         result = prob.solve(solver='MOSEK', verbose=False)
@@ -291,7 +363,8 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
                 prob.objective.set_quadratic(quad_coeffs)
 
             prob.linear_constraints.add(rhs=np.zeros(G.n), senses='E' * G.n)
-            prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
+            prob.linear_constraints.set_coefficients(
+                zip(G.rows, G.cols, G.values))
 
             prob.linear_constraints.add(rhs=b, names=names, senses=senses)
             prob.linear_constraints.set_coefficients(
@@ -318,6 +391,9 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
                     [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
                 prob.objective.set_quadratic(quad_coeffs)
 
+        timelim_cb = prob.register_callback(TimeLimitCallback)
+        timelim_cb.acceptablegap = acceptablegap
+        timelim_cb.aborted = 0
         prob.solve()
 
         obj = prob.solution.get_objective_value()
@@ -360,6 +436,8 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
     infeas = []
     lams = []
     fs = []
+    acceptablegap = 1e-8
+
     while not found:
         iters += 1
         mid_prev = mid
@@ -368,9 +446,11 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
         if iters > 1 and warm_start == False:
             warm_start = True
 
+        # if f < 1e-4:
+        #     acceptablegap = 1e-6
         lams.append(mid)
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
-            G, mid, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy)
+            G, mid, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy, acceptablegap=acceptablegap)
 
         infeas.append(max_infeas)
         var_cost = np.multiply(G.var, x).dot(x)
@@ -414,7 +494,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
                 high = mid
             else:
                 low = mid
-        if iters > 9:
+        if iters > 7:
             break
 
     elapsed = time.time() - start
@@ -462,6 +542,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
     infeas = []
     fs = []
     lams = []
+    acceptablegap = 1e-8
     while not found:
         iters += 1
 
@@ -470,9 +551,11 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
             warm_start_xi = True
 
         lams.append(lam)
+        # if f < 1e-4:
+        #     acceptablegap = 1e-6
 
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
-            G, lam, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy)
+            G, lam, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy, acceptablegap=acceptablegap)
         iter_var_times.append(elapsed)
         infeas.append(max_infeas)
         var_cost = np.multiply(G.var, x).dot(x)
@@ -509,7 +592,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         #             break
 
         elapsed_xi, xi, prob_xi, max_infeas = cvxpy_solve_xi(
-            G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters, cvxpy=cvxpy)
+            G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters, cvxpy=cvxpy, acceptablegap=acceptablegap)
         iter_xi_times.append(elapsed_xi)
         infeas.append(max_infeas)
 
@@ -528,7 +611,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         if lp:
             lam = np.maximum(lam, np.zeros(G.m))
 
-        if iters > 5:
+        if iters > 3:
             break
 
     elapsed = time.time() - start
@@ -752,9 +835,9 @@ def get_networks(experiment, tails, exponents, types, test=False):
 
     extension = 'pickle'
 
-    for tail in tails:
-        for atype in types:
-            for exponent in exponents:
+    for exponent in exponents:
+        for tail in tails:
+            for atype in types:
                 net_name = netgen_base + atype + exponent + tail
                 cur_run = experiment + '/' + netgen_base + \
                     '/' + net_name[:net_name.find('.')]
@@ -765,13 +848,12 @@ def get_networks(experiment, tails, exponents, types, test=False):
                         networks.append(net_name)
                 else:
                     networks.append(net_name)
-        if experiment == 'varying_lambar' or experiment == 'base_vs_reliable':
-            continue
-        else:
-            for atype in types:
-                if atype == '_lo_8_' or atype == '_lo_sr_':
-                    continue
-                for exponent in exponents:
+            if experiment == 'varying_lambar' or experiment == 'base_vs_reliable':
+                continue
+            else:
+                for atype in types:
+                    if atype == '_lo_8_' or atype == '_lo_sr_':
+                        continue
                     net_name = goto_base + atype + exponent + tail
                     cur_run = experiment + '/' + goto_base + \
                         '/' + net_name[:net_name.find('.')]
@@ -837,9 +919,10 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
             '/' + network[:network.find('.')]
         cplex_saved = experiment + '/' + generator + '/' + 'cplex' + \
             '/' + network[:network.find('.')] + "_cplex_results"
-
+        
         if not os.path.isfile(os.path.join(EXPERIMENT_PATH, cplex_saved) + '.pickle'):
-            solver_obj, solver_elapsed, solver_soln, solver_infeas = cvxpy_solve(G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+            status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
 
         else:
             filename = cplex_saved
@@ -850,10 +933,11 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
 
         print('Solver finished in {} seconds, with objective {}'.format(
             solver_elapsed, solver_obj))
-        
+
         cvxpy_alg = cvxpy
 
-        _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(G, lam=0, lp=True, cvxpy=cvxpy_alg)
+        _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+            G, lam=0, lp=True, cvxpy=cvxpy_alg)
         var_cost = np.multiply(G.var, soln).dot(soln)
         lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
 
@@ -870,16 +954,15 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
             bs_elapsed, bs_obj))
 
         nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
-            G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low, cvxpy=cvxpy_alg)
+            G, lp=False, low=lam_low, high=G.lambar / 2.0, lam_init=lam_low, cvxpy=cvxpy_alg)
 
         nr_elapsed += lb_elapsed
 
         print('NR finished in {} seconds, with objective {}'.format(
             nr_elapsed, nr_obj))
 
-
         if cvxpy:
-            t = PrettyTable(['Method', 'Soln Time',
+            t = PrettyTable(['Method', 'Soln Time', 
                              '# Iters', 'Obj', 'Rel_Gap'])
             t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
                        solver_obj, '-'])
@@ -888,30 +971,30 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
             t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
                 solver_obj - bs_obj) / bs_obj])
         else:
-            t = PrettyTable(['Method', 'Soln Time',
+            t = PrettyTable(['Method', 'Soln Time', 'Status', 'Feasible',
                              '# Iters', 'Obj', 'Rel_Gap', 'Infeas'])
-            t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
+            t.add_row(['CPLEX', round(solver_elapsed, 2), status, feasible, '-',
                        solver_obj, '-', round(solver_infeas, 3)])
-            t.add_row(['NR', round(nr_elapsed, 2), len(nr_iter_elapsed),
+            t.add_row(['NR', round(nr_elapsed, 2), '-', '-', len(nr_iter_elapsed),
                        nr_obj, abs(solver_obj - nr_obj) / nr_obj, round(nr_avg_infeas, 3)])
-            t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
+            t.add_row(['BSC', round(bs_elapsed, 2), '-', '-', len(bs_iter_elapsed), bs_obj, abs(
                 solver_obj - bs_obj) / bs_obj, round(bs_avg_infeas, 3)])
-
+        
         print(t)
         if record:
 
-            solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
+            # solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
 
-            keys = ['network_name', 'G', 'solver_elapsed', 'solver_obj', 'solver_infeas',
+            keys = ['network_name', 'G', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
                     'nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
                     'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'lambar', 'm', 'n',
                     'elapsed_lower_bound', 'elapsed_upper_bound',
-                    'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs', 'solver_iter_objs', 'solver_iter_elapsed', 'presolve_time', 'ordering_time']
+                    'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs']
 
-            values = [network[:network.find('.')], G, solver_elapsed, solver_obj, solver_infeas,
+            values = [network[:network.find('.')], G, status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
                       nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
                       nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, G.lambar, G.m, G.n, lb_elapsed, ub_elapsed,
-                      bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs, solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time]
+                      bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs]
 
             run_dict = dict(zip(keys, values))
 
@@ -946,20 +1029,20 @@ def varying_lambda_experiment(networks, lambars, record=True):
 
             G = load_data(networkFileName=filename, G=G, generator=generator)
 
-            lam_dir = str(lambar).replace('.','')
+            lam_dir = str(lambar).replace('.', '')
             run_name = experiment + '/' + generator + \
                 '/' + network[:network.find('.')] + '_' + lam_dir
 
-
             solver_weird = False
-            solver_obj, solver_elapsed, solver_soln, solver_infeas = cvxpy_solve(
-                G)
+
+            status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+
             print('Solver finished in {} seconds, with objective {}'.format(
                 solver_elapsed, solver_obj))
 
             if solver_infeas > 2:
                 solver_weird = True
-
 
             # getting bounds:
             _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(G, lam=0, lp=True)
@@ -1000,18 +1083,20 @@ def varying_lambda_experiment(networks, lambars, record=True):
 
             if record:
 
-                solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
+                # solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
 
-                keys = ['network_name', 'G', 'solver_elapsed', 'solver_obj', 'solver_infeas',
+                keys = ['network_name', 'G', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
                         'nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
                         'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'lambar', 'm', 'n',
                         'elapsed_lower_bound', 'elapsed_upper_bound',
-                        'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs', 'solver_iter_objs', 'solver_iter_elapsed', 'presolve_time', 'ordering_time']
+                        'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs']
 
-                values = [network[:network.find('.')], G, solver_elapsed, solver_obj, solver_infeas,
+                values = [network[:network.find('.')], G, status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
                           nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
                           nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, G.lambar, G.m, G.n, lb_elapsed, ub_elapsed,
-                          bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs, solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time]
+                          bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs]
+
+
 
                 run_dict = dict(zip(keys, values))
 
@@ -1037,25 +1122,26 @@ def base_vs_reliable_expr(networks, lambars):
                 filename = 'networks/netgen/' + network
 
             G = load_data(networkFileName=filename, G=G, generator=generator)
-            
-            lam_dir = str(lambar).replace('.','')
+
+            lam_dir = str(lambar).replace('.', '')
 
             run_name = experiment + '/' + generator + \
                 '/' + network[:network.find('.')] + '_' + lam_dir
-            
+
             solver_weird = False
-            reliable_obj, reliable_elapsed, _, solver_infeas = cvxpy_solve(G)
+            status, feasible, reliable_obj, reliable_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
 
             if solver_infeas > 2:
                 solver_weird = True
-
 
             print('reliable_obj is {}'.format(reliable_obj))
             orig_var = copy.deepcopy(G.var)
 
             G.var = np.zeros(G.m)
 
-            _, base_elapsed, base_x, _ = cvxpy_solve(G)
+            status, feasible, obj, base_elapsed, base_x, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
             base_x = base_x[:-1]
             var_cost = np.multiply(orig_var, base_x).dot(base_x)
             base_obj = G.mu.dot(base_x) + G.lambar * (np.sqrt(var_cost))
@@ -1064,7 +1150,8 @@ def base_vs_reliable_expr(networks, lambars):
 
             t = PrettyTable(['Approach', 'Objective', 'Rel-Gap'])
             t.add_row(['Reliable', reliable_obj, '-'])
-            t.add_row(['Base', base_obj, (base_obj - reliable_obj)/reliable_obj])
+            t.add_row(
+                ['Base', base_obj, (base_obj - reliable_obj) / reliable_obj])
             print(t)
 
             keys = ['network_name', 'G', 'base_elapsed', 'base_obj',
@@ -1101,7 +1188,6 @@ if test:
 # graph_family_experiment(networks, lambar)
 
 
-
 cvxpy = False
 fusion = False
 
@@ -1112,41 +1198,47 @@ if fusion:
 else:
     import cplex
 
-lambar = 10
-tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
-exponents = (np.arange(10, 15)).astype(str)
-types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
-experiment = 'graph_families'
-networks = get_networks(experiment, tails, exponents, types)
-graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+# lambar = 10
+# tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
+# exponents = (np.arange(10, 15)).astype(str)
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
 
-print('starting lambar experiments')
-lambars = [0.001, 0.1, 10, 1000]
-tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
-exponents = ['12']
-types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
-experiment = 'varying_lambar'
-networks = get_networks(experiment, tails, exponents, types)
-varying_lambda_experiment(networks, lambars)
+# print('starting lambar experiments')
+# lambars = [0.001, 0.1, 10, 1000]
+# tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
+# exponents = ['10']
+# types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+# experiment = 'varying_lambar'
+# networks = get_networks(experiment, tails, exponents, types)
+# varying_lambda_experiment(networks, lambars)
 
+
+# print('starting base vs reliable experiments')
+# lambars = [0.1, 10, 1000]
+# exponents = ['10']
+# types = ['_sr_', '_8_']
+# tails = ['a.min']
+# experiment = 'base_vs_reliable'
+# networks = get_networks(experiment, tails, exponents, types)
+# base_vs_reliable_expr(networks, lambars)
 
 lambar = 10
 tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
 exponents = (np.arange(10, 16)).astype(str)
-types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
 experiment = 'graph_families'
 networks = get_networks(experiment, tails, exponents, types)
 graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
 
-
-print('starting base vs reliable experiments')
-lambars = [0.1, 10, 1000]
-exponents = ['12']
-types = ['_sr_', '_8_']
-tails = ['a.min']
-experiment = 'base_vs_reliable'
-networks = get_networks(experiment, tails, exponents, types)
-base_vs_reliable_expr(networks, lambars)
-
+# lambar = 10
+# tails = ['a.min', 'b.min', 'c.min', 'd.min', 'e.min']
+# exponents = (np.arange(10, 16)).astype(str)
+# types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)

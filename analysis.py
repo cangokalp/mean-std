@@ -22,14 +22,17 @@ def save_fig(fig_id, tight_layout=False, fig_extension="png", resolution=300):
 
 
 def mean_std(array):
-    mean = array.mean(axis=1)
-    std = array.std(axis=1)
+
+    # mean = array.nanmean(axis=1)
+    mean = np.nanmean(np.where(array!=0, array, np.nan), 1)
+    std = np.nanstd(np.where(array!=0, array, np.nan), 1)
+    # std = array.nanstd(axis=1)
     print(mean)
     return mean, std
 
 
 def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_iters_, cplex_infeas_):
-    node_num = [r'$2^{10}$', r'$2^{11}$', r'$2^{12}$', r'$2^{13}$']
+    node_num = [r'$2^{10}$', r'$2^{11}$', r'$2^{12}$', r'$2^{13}$', r'$2^{14}$', r'$2^{15}$']
 
     print(family_name)
 
@@ -42,9 +45,9 @@ def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_it
     
     print(cplex_infeas_, nr_iters_, bs_iters_)
 
-    plt.plot(node_num, cplex_mean, 'b:o', linewidth=2, label='CPLEX')
-    plt.plot(node_num, nr_mean, 'g:s', linewidth=2, label='NR')
-    plt.plot(node_num, bsc_mean, 'r:^', linewidth=2, label='BSC')
+    plt.plot(node_num, cplex_mean, 'b:o', linewidth=1, label='CPLEX', markersize=4)
+    plt.plot(node_num, nr_mean, 'g:s', linewidth=1, label='NR', markersize=4)
+    plt.plot(node_num, bsc_mean, 'r:^', linewidth=1, label='BSC', markersize=4)
 
     # plt.fill_between(node_num, cplex_mean - cplex_std, cplex_mean + cplex_std, facecolor='blue', alpha=0.1);
     # plt.fill_between(node_num, nr_mean - nr_std, nr_mean + nr_std, facecolor='green', alpha=0.1);
@@ -53,7 +56,11 @@ def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_it
     plt.ylabel('Running time (logscale)', fontsize=12)
     plt.xlabel('Number of nodes', fontsize=12)
     plt.yscale('log')
-    plt.ylim(bottom=1e0, top=1e3)
+    plt.xscale('log')
+    # if family_name.lower().find('sr') >= 0:
+    #     plt.ylim(bottom=1e0, top=1e4)
+    # else:
+    #     plt.ylim(bottom=1e0, top=1e3)
     # plt.axis([xs,xe,ys,ye])
 
     plt.grid(True)
@@ -69,8 +76,8 @@ nr_times = []
 
 bases = ['netgen', 'goto']
 tails = ['a', 'b', 'c', 'd', 'e']
-exponents = (np.arange(10, 14)).astype(str)
-types = ['_8_', '_sr_', '_lo_8_', '_lo_sr_']
+exponents = (np.arange(10, 16)).astype(str)
+types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
 
 
 
@@ -110,12 +117,12 @@ for base in bases:
             continue
         i += 1
         if base == 'netgen':
-            rel_tol = 1e-8
+            rel_tol = 1e-6
 
             figure_grid = 220
             plt.subplot(figure_grid + i)
         else:
-            rel_tol = 1e-8
+            rel_tol = 1e-6
 
             figure_grid = 120
             plt.subplot(figure_grid + i)
@@ -133,6 +140,8 @@ for base in bases:
             nr_iter_list = []
             cplex_infeas_list = []
             j = 0
+            if exponent == '15':
+                tails = ['a']
 
             for tail in tails:
                 cut_idx = None
@@ -145,10 +154,11 @@ for base in bases:
                 cplex_times[row, col] = data_dic['solver_elapsed']
                 cplex_obj = data_dic['solver_obj']
 
-                cplex_iter_objs = data_dic['solver_iter_elapsed']
-                cplex_iter_times = data_dic['solver_iter_objs']
-                cplex_iter_times_bk = data_dic['solver_iter_objs']
-                cplex_iter_times = [data_dic['solver_elapsed'] - sum(cplex_iter_times_bk)] + cplex_iter_times
+                cplex_iter_objs = data_dic['solver_primals']
+                cplex_iter_times = data_dic['solver_iter_times']
+                cplex_feasible = data_dic['solver_feasible']
+                # cplex_iter_times_bk = data_dic['solver_iter_objs']
+                # cplex_iter_times = [data_dic['solver_elapsed'] - sum(cplex_iter_times_bk)] + cplex_iter_times
 
                 cplex_iter_objs[-1] = cplex_obj
 
@@ -178,6 +188,13 @@ for base in bases:
                         bs_iter_elapsed = bs_iter_elapsed[:bs_ind+1]
                         break
 
+                for cp_ind in range(len(cplex_iter_objs)-1, 0, -1):
+                    if not math.isclose(cplex_iter_objs[cp_ind], cplex_iter_objs[cp_ind-1], rel_tol=1e-9):
+                        cplex_iter_objs = cplex_iter_objs[:cp_ind+1]
+                        cplex_iter_times = cplex_iter_times[:cp_ind+1]
+                        break
+
+
                 # cind_found = False
                 # len_cplex_iters = len(cplex_iter_objs)
                 # for cp_ind in range(len(cplex_iter_objs)-1, 0, -1):
@@ -198,7 +215,6 @@ for base in bases:
                 #             break
 
                 if atype=='_sr_' and exponent=='13' and (tail=='c' or tail=='e') and base=='goto':
-                    
                     nr_times_g[tail] = nr_iter_elapsed
                     nr_objs_g[tail] = nr_iter_objs
 
@@ -221,41 +237,53 @@ for base in bases:
                 #     cplex_times_g_reg[tail] = cplex_times_g_reg[tail] + cplex_iter_times
                 #     cplex_objs_g_reg[tail] = cplex_iter_objs
 
-                def get_indices(rel_tol, algo='nr'):
+                def get_indices(rel_tol, algo='nr', min_obj=None):
                     
                     ind = None
                     if algo=='nr':
                         for p in range(len(nr_iter_objs)):
-                            if math.isclose(cplex_obj, nr_iter_objs[p], rel_tol=rel_tol):
+                            if math.isclose(min_obj, nr_iter_objs[p], rel_tol=rel_tol):
                                 ind = p
                                 break
 
                     else:
                         for p in range(len(bs_iter_objs)):
-                            if math.isclose(cplex_obj, bs_iter_objs[p], rel_tol=rel_tol):
+                            if math.isclose(min_obj, bs_iter_objs[p], rel_tol=rel_tol):
                                 ind = p
                                 break
 
                     return ind
 
-                def find_indices(iter_objs, algo='nr'):
-                    ind = get_indices(rel_tol, algo)
+                def find_indices(iter_objs, algo='nr', min_obj=None):
+                    ind = get_indices(rel_tol, algo, min_obj)
 
                     if not math.isclose(cplex_obj, min(iter_objs), rel_tol=rel_tol):
-                        ind = get_indices(rel_tol*10, algo)
+                        ind = get_indices(rel_tol*10, algo, min_obj)
 
                         if not math.isclose(cplex_obj, min(iter_objs), rel_tol=rel_tol*10):
-                            ind = get_indices(rel_tol*100, algo)
+                            ind = get_indices(rel_tol*100, algo, min_obj)
 
                             if not math.isclose(cplex_obj, min(iter_objs), rel_tol=rel_tol*100):
-                                ind = get_indices(rel_tol*10000, algo)
+                                ind = get_indices(rel_tol*10000, algo, min_obj)
                     return ind
 
-                
-                nr_i = find_indices(nr_iter_objs, 'nr')
-                bs_i = find_indices(bs_iter_objs, 'bs')
+                if data_dic['solver_infeas'] < 1e-3:
+                    min_obj = min(nr_iter_objs[-1], bs_iter_objs[-1], cplex_obj)
+                    nr_i = find_indices(nr_iter_objs, 'nr', min_obj)
+                    bs_i = find_indices(bs_iter_objs, 'bs', min_obj)
+                else:
+                    min_alg = min(min(nr_iter_objs), min(bs_iter_objs))
+                    if cplex_obj < min_alg:
+                        min_obj = min_alg
+                    else:
+                        min_obj = cplex_obj
 
-                        
+                    nr_i = find_indices(nr_iter_objs, 'nr', min_obj)
+                    bs_i = find_indices(bs_iter_objs, 'bs', min_obj)
+
+                # if not cplex_feasible:
+                #     pdb.set_trace()
+                
 
                 # for idx in range(len(cplex_iter_objs)-1, 0, -1):
                 #     if not math.isclose(cplex_iter_objs[idx], nr_iter_objs[nr_i], rel_tol=1e-9):
@@ -274,11 +302,13 @@ for base in bases:
 
                 # print('*********')
                 # print('network: ', network)
-                # print('cut_idx: ', cut_idx)
                 # print('nr_obj: ', nr_iter_objs[nr_i])
                 # print('bs_obj: ', bs_iter_objs[bs_i])
                 # print('cplex end obj: ', cplex_obj)
-                # print('cplex at cut_idx: ', cplex_iter_objs[cut_idx])
+                # print('infeas: ',data_dic['solver_infeas'] )
+                # print('status: ',data_dic['solver_status'] )
+
+                # # print('cplex at cut_idx: ', cplex_iter_objs[cut_idx])
                 # print('---------')
                 # print('cplex iters: ', cplex_iter_objs)
                 # print('nr_iter_objs: ', nr_iter_objs)
@@ -286,10 +316,11 @@ for base in bases:
                 # print('&&&&&&&&&&&&')
 
 
-                cplex_times[row, col] = data_dic['solver_elapsed'] #- sum(cplex_iter_times_bk[cut_idx+1:])
+                # cplex_times[row, col] = data_dic['solver_elapsed'] #- sum(cplex_iter_times_bk[cut_idx+1:])
+                cplex_times[row, col] = cplex_iter_times[-1]
 
                 if atype=='_sr_' and exponent=='13' and (tail=='c' or tail=='e') and base=='netgen':
-                    print('convergence graph work')
+
                     # nr_times_e[tail] = nr_iter_elapsed[:nr_i+1]
                     # nr_objs_e[tail] = nr_iter_objs[:nr_i+1]
 
@@ -300,12 +331,17 @@ for base in bases:
                     nr_objs_e[tail] = data_dic['nr_iter_objs']
                     bs_times_e[tail] = data_dic['bs_iter_elapsed']
                     bs_objs_e[tail] = data_dic['bs_iter_objs']
+                    
+                    nr_times_e[tail] = lb_elapsed + np.array(nr_times_e[tail])
+                    bs_times_e[tail] = lb_elapsed + ub_elapsed + np.array(bs_times_e[tail])
 
                     cplex_times_e[tail] = cplex_iter_times
                     cplex_objs_e[tail] = cplex_iter_objs
                     # cplex_times_e[tail] = cplex_iter_times[:cut_idx+1]
                     # cplex_objs_e[tail] = cplex_iter_objs[:cut_idx+1]
 
+                if exponent=='15':
+                    pdb.set_trace()
                 nr_elapsed = nr_iter_elapsed[nr_i]
                 bs_elapsed = bs_iter_elapsed[bs_i]
 
@@ -316,7 +352,11 @@ for base in bases:
                 nr_times[row, col] = nr_elapsed
                 bsc_times[row, col] = bs_elapsed
 
+                if bs_i>6 or nr_i>3:
+                    pdb.set_trace()
+                    
                 j += 1
+                # print(nr_times)
             nr_iters_[row] = np.mean(nr_iter_list)
             bs_iters_[row] = np.mean(bs_iter_list)
             cplex_infeas_[row] = np.mean(cplex_infeas_list)
@@ -340,9 +380,9 @@ for base in bases:
     # plt.subplots.adjust(hspace = 0.2)
     plt.tight_layout(pad=1.5)
 
-    if base == 'netgen':
-        plt.plot([0.5, 0.5], [0, 1], marker=',', color='lightgreen', lw=1 ,transform=plt.gcf().transFigure, clip_on=False)
-        plt.plot([0, 1], [0.5, 0.5], marker=',', color='lightgreen', lw=1 ,transform=plt.gcf().transFigure, clip_on=False)
+    # if base == 'netgen':
+    #     plt.plot([0.5, 0.5], [0, 1], marker=',', color='lightgreen', lw=1 ,transform=plt.gcf().transFigure, clip_on=False)
+    #     plt.plot([0, 1], [0.5, 0.5], marker=',', color='lightgreen', lw=1 ,transform=plt.gcf().transFigure, clip_on=False)
     
     save_fig('comparison_' + base.lower())
     plt.clf()
@@ -368,7 +408,6 @@ for tail in convergence_tails:
     bs_objs_e[tail] = bs_objs_e[tail][:bsmin+1]
     bs_times_e[tail] = bs_times_e[tail][:bsmin+1]
 
-
     nr_objs_e[tail] = np.array(nr_objs_e[tail])
     bs_objs_e[tail] = np.array(bs_objs_e[tail])
     cplex_objs_e[tail] = np.array(cplex_objs_e[tail])
@@ -385,13 +424,25 @@ for tail in convergence_tails:
     bs_objs_e[tail] = np.array(bs_objs_e[tail])
     cplex_objs_e[tail] = np.array(cplex_objs_e[tail])
 
-    plt.plot(nr_times_e[tail], nr_objs_e[tail], 'g:s', linewidth=1, label='NR')
-    plt.plot(bs_times_e[tail], bs_objs_e[tail], 'r:^', linewidth=1, label='BSC')
-    plt.plot(np.cumsum(cplex_times_e[tail]), cplex_objs_e[tail], 'b:o', linewidth=1, label='CPLEX')
+    plt.plot(nr_times_e[tail], nr_objs_e[tail], 'g--s', linewidth=1, label='NR')
+    plt.plot(bs_times_e[tail], bs_objs_e[tail], 'r--^', linewidth=1, label='BSC')
+    # plt.plot(np.cumsum(cplex_times_e[tail]), cplex_objs_e[tail], 'b--o', linewidth=1, label='CPLEX')
+    plt.plot(cplex_times_e[tail], cplex_objs_e[tail], 'b--o', linewidth=1, label='CPLEX')
+
+    plt.plot([0, nr_times_e[tail][0]], [nr_objs_e[tail][0], nr_objs_e[tail][0]], "k:")# Not shown
+    plt.plot([nr_times_e[tail][0], nr_times_e[tail][0]], [1e-10, nr_objs_e[tail][0]], "k:")# Not shown
+    plt.plot([nr_times_e[tail][0], nr_times_e[tail][0]], [1e-10, cplex_objs_e[tail][6]], "k:")# Not shown
+    plt.plot([0, nr_times_e[tail][0]], [cplex_objs_e[tail][6], cplex_objs_e[tail][6]], "k:")# Not shown
+    
+
+    # plt.plot([7813], [0.9], "ko")                   # Not shown
+
 
     plt.ylabel('Relative objective gap (logscale)', fontsize=12)
     plt.yscale('log')
     plt.ylim(bottom=1e-10)
+    plt.xlim(left=0)
+
     plt.xlabel('Running time', fontsize=12)
     # plt.axis([xs,xe,ys,ye])
     family_name = 'NETGEN' + '-' + 'SR' + '-13' + tail + '  (m=' + 'n' + r'$\sqrt{n}$' + ')' 
@@ -442,7 +493,8 @@ for tail in infeasiblity_tails:
 
     plt.plot(nr_times_g[tail], nr_objs_g[tail], 'g:s', linewidth=1, label='NR')
     plt.plot(bs_times_g[tail], bs_objs_g[tail], 'r:^', linewidth=1, label='BSC')
-    plt.plot(np.cumsum(cplex_times_g[tail]), abs(cplex_objs_g[tail]), 'b:o', linewidth=1, label='CPLEX')
+    # plt.plot(np.cumsum(cplex_times_g[tail]), abs(cplex_objs_g[tail]), 'b:o', linewidth=1, label='CPLEX')
+    plt.plot(cplex_times_g[tail], abs(cplex_objs_g[tail]), 'b:o', linewidth=1, label='CPLEX')
 
     plt.ylabel('Relative objective gap (logscale)', fontsize=12)
     plt.yscale('log')
@@ -458,16 +510,12 @@ save_fig('infeasibility_' + 'sr')
 plt.clf()
 
 
-pdb.set_trace()
-
-
-
 
 experiment = 'varying_lambar'
 bases = ['netgen']
 tails = ['a', 'b', 'c', 'd', 'e']
-exponents = np.array(['11'])
-types = ['_8_', '_sr_', '_lo_8_', '_lo_sr_']
+exponents = np.array(['10'])
+types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
 
 lams = np.array([0.001, 0.1, 10, 1000])
 
@@ -518,7 +566,10 @@ for base in bases:
                     
                     row = np.where(exponents==exponent)[0][0]
                     col = j
-                    print(filename)
+                    if data_dic['solver_infeas'] > 1e-4:
+                        print('net: ', filename)
+                        print('lambda_bar: ', lam)
+                        print('solver_infeas: ', data_dic['solver_infeas'])
 
                     cplex_times[row, col] = data_dic['solver_elapsed']
                     cplex_obj = data_dic['solver_obj']
@@ -541,74 +592,63 @@ for base in bases:
                     bs_iter_elapsed = lb_elapsed + ub_elapsed + np.array(bs_iter_elapsed)
 
 
-
-                    def get_indices(rel_tol):
-                        nr_i, bs_i = None, None
-
-                        for p in range(len(nr_iter_objs)):
-                            if math.isclose(cplex_obj, nr_iter_objs[p], rel_tol=rel_tol):
-                                nr_i = p
-                                break
-
-                            if p==len(nr_iter_objs)-1:
-                                weird = True
+                    for nr_ind in range(len(nr_iter_objs)-1, 0, -1):
+                        if not math.isclose(nr_iter_objs[nr_ind], nr_iter_objs[nr_ind-1], rel_tol=1e-9):
+                            nr_iter_objs = nr_iter_objs[:nr_ind+1]
+                            nr_iter_elapsed = nr_iter_elapsed[:nr_ind+1]
+                            break
 
 
-                        for p in range(len(bs_iter_objs)):
-                            if math.isclose(cplex_obj, bs_iter_objs[p], rel_tol=rel_tol):
-                                bs_i = p
-                                break
+                    for bs_ind in range(len(bs_iter_objs)-1, 0, -1):
+                        if not math.isclose(bs_iter_objs[bs_ind], bs_iter_objs[bs_ind-1], rel_tol=1e-9):
+                            bs_iter_objs = bs_iter_objs[:bs_ind+1]
+                            bs_iter_elapsed = bs_iter_elapsed[:bs_ind+1]
+                            break
+                    
 
+                    def get_indices(rel_tol, algo='nr'):
+                    
+                        ind = None
+                        if algo=='nr':
+                            for p in range(len(nr_iter_objs)):
+                                if math.isclose(cplex_obj, nr_iter_objs[p], rel_tol=rel_tol):
+                                    ind = p
+                                    break
 
-                            if p==len(bs_iter_objs)-1:
-                                weird = True
+                        else:
+                            for p in range(len(bs_iter_objs)):
+                                if math.isclose(cplex_obj, bs_iter_objs[p], rel_tol=rel_tol):
+                                    ind = p
+                                    break
 
-                        return nr_i, bs_i
+                        return ind
 
+                    def find_indices(iter_objs, algo='nr'):
+                        ind = get_indices(rel_tol, algo)
 
-                    nr_i, bs_i = get_indices(rel_tol)
+                        if not math.isclose(cplex_obj, min(iter_objs), rel_tol=rel_tol):
+                            ind = get_indices(rel_tol*10, algo)
 
-                    if not math.isclose(cplex_obj, min(nr_iter_objs), rel_tol=rel_tol):
-                        nr_i, bs_i = get_indices(rel_tol*10)
+                            if not math.isclose(cplex_obj, min(iter_objs), rel_tol=rel_tol*10):
+                                ind = get_indices(rel_tol*100, algo)
 
-                        if not math.isclose(cplex_obj, min(nr_iter_objs), rel_tol=rel_tol*10):
-                            print(base)
-                            print('weird case')
-                            print('solver infeas: ', print(data_dic['solver_infeas']))
+                                if not math.isclose(cplex_obj, min(iter_objs), rel_tol=rel_tol*100):
+                                    ind = get_indices(rel_tol*10000, algo)
+                        return ind
 
-                            nr_i, bs_i = get_indices(rel_tol*100)
+                
+                    nr_i = find_indices(nr_iter_objs, 'nr')
+                    bs_i = find_indices(bs_iter_objs, 'bs')
 
-                            if not math.isclose(cplex_obj, min(nr_iter_objs), rel_tol=rel_tol*100):
-
-                                nr_i, bs_i = get_indices(rel_tol*1000)
-
-                                if not math.isclose(cplex_obj, min(nr_iter_objs), rel_tol=rel_tol*1000):
-
-                                    nr_i, bs_i = get_indices(rel_tol*10000)
-                                    
-                                    if not math.isclose(cplex_obj, min(nr_iter_objs), rel_tol=rel_tol*10000):
-                                    
-                                        nr_i, bs_i = get_indices(rel_tol*100000)
-                                        pdb.set_trace()
-
-
-                    # for idx in range(len(cplex_iter_objs)):
-                    #     if math.isclose(cplex_iter_objs[idx], nr_iter_objs[nr_i], rel_tol=rel_tol):
-                    #         cut_idx = idx
-                    #         break
-
-                    # if cut_idx == None:
-                    #     for idx in range(len(cplex_iter_objs)):
-                    #         if math.isclose(cplex_iter_objs[idx], nr_iter_objs[nr_i], rel_tol=sec_rel_tol):
-                    #             cut_idx = idx
-                    #             break
-
-                    # if cut_idx == None:
-                    #     cut_idx = len(cplex_iter_objs)-1
 
                     cplex_time = data_dic['solver_elapsed'] #- sum(cplex_iter_times[cut_idx:])
                     cplex_times[row, col] = cplex_time
                     
+                    if (bs_i is None):
+                        bs_i = 0
+                    if nr_i is None:
+                        nr_i = 0    
+
                     nr_elapsed = nr_iter_elapsed[nr_i]
                     bs_elapsed = bs_iter_elapsed[bs_i]
 
@@ -618,6 +658,7 @@ for base in bases:
                     except:
                         pdb.set_trace()
                     j+=1
+
             elapsed[0, lam_col] = nr_times.mean(axis=1)
             elapsed[1, lam_col] = bsc_times.mean(axis=1)
             elapsed[2, lam_col] = cplex_times.mean(axis=1) 
@@ -647,7 +688,7 @@ for base in bases:
                 0, 20), ha='center', va='bottom', rotation=70,  size='smaller')
 
 
-        plt.ylabel('Running time (logscale)')
+        plt.ylabel('Running time')
 
         plt.xticks([(r + barWidth) for r in range(4)],
                    [r'$\lambda$' + '=0.001', r'$\lambda$' + '=0.1', r'$\lambda$' + '=10', r'$\lambda$' + '=1000'])
