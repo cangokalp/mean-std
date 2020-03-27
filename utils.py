@@ -148,7 +148,7 @@ def read_metadata(lines, generator='netgen'):
 
 
 def load_data(networkFileName, G, generator='netgen'):
-    np.random.seed(seed=10)
+    np.random.seed(seed=99)
     try:
         # with open(networkFileName, "r") as networkFile:
         #         pdb.set_trace()
@@ -208,11 +208,14 @@ def load_data(networkFileName, G, generator='netgen'):
 
                 mu[i] = float(data[5])
 
-                # if mu[i] == 0:
-                #     mu[i] = np.random.uniform(
-                #         max_arc_cost / 4.0, max_arc_cost / 1.5)
-
                 cov_coef = np.random.uniform(0.15, 0.3)
+                # if mu[i] < max_arc_cost/3:
+                #     cov_coef = np.random.uniform(0.15, 0.45)
+                # if mu[i] >= max_arc_cost/3 and mu[i] < max_arc_cost/3*2:
+                #     cov_coef = np.random.uniform(0.30, 0.60)
+                # elif mu[i] >= max_arc_cost/3*2:
+                #     cov_coef = np.random.uniform(0.15, 0.45)
+
                 sigma = mu[i] * cov_coef
                 var[i] = sigma**2
                 cap[i] = float(data[4]) 
@@ -240,6 +243,7 @@ def load_data(networkFileName, G, generator='netgen'):
         G.rows = rows
         G.cols = cols
         G.values = values
+        G.arc_dict = arc_dict
 
 
     except IOError:
