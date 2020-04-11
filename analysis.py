@@ -1,1532 +1,773 @@
-import numpy as np
 import matplotlib.pyplot as plt
 import pandas
 import copy
-import pickle
 import pdb
 import pandas as pd
-from tabulate import tabulate
-
-
-def load(list_to_load, num_nodes, experiment_name):
-    list_to_load = 'saved_runs/' + str(num_nodes) + '/' + experiment_name + '/' + list_to_load + '.pickle'
-    with open(list_to_load, 'rb') as f:
-        loaded_list = pickle.load(f)
-    return loaded_list
-
-def get_level_time(gap_list, time_list):
-    level_time = {}
-    levels = [1e3,1e0,1e-3,1e-6]
-    for level in levels:
-        level_time[level] = 0
-
-        for j in range(10):
-            try:
-                ind = np.where(np.array(gap_list[j])<level)[0][0]
-                level_time[level] += time_list[j][ind]
-            except:
-                pdb.set_trace()
-        level_time[level] = level_time[level]/10.0
-
-    sorted_d = sorted(level_time.items(), key=lambda x: x[0])
-    gap, time = zip(*sorted_d)
-    return gap, time
-
-def read_log(logfilename):
-    f = open(logfilename + '_processed.txt', 'w')
-    ff = open(logfilename + '.txt', 'r+')
-    w_to_processed = False
-
-    for line in ff.readlines():
-        if line.find('ITE PFEAS') >= 0:
-            w_to_processed = True
-        if line.find('Optimizer terminated') >=0:
-            w_to_processed = False
-        if w_to_processed:
-            f.write(line)
-    f.close()
-
-    log = pandas.read_table(logfilename + '_processed.txt', delim_whitespace=True, sep='\t', lineterminator='\n')
-    return log
-
-def find_eq_obj_ind(alg, best_obj, descent_to):
-    len_alg = len(alg)
-    for i in range(len_alg):
-        if 100*((alg[i]/benchmark)-1) <= descent_to:
-            return i+1
-
-
-
-
-lams = np.linspace(0, 5, num=50)
-n = 250
-arcs = 1000
-mu=50
-var=50
-d_top = 1
-mucosts=[]
-varcosts=[]
-seed = 9
-lam_costs = {}
-iters = 0 
-vallams = []
-for lam in lams:
-    if (iters%1==0 and iters<=10) or (iters%5==0 and iters>10) or lam==lams[-1] :
-        lamstr = str(round(lam, 6))
-        lamstr = lamstr.replace('.','')
-
-        save_extension = str(mu) + str(var) + '_' + str(arcs) + '_' + str(seed) + str(d_top)
-
-        experiment_name = 'varying_lams'
-        mucost = load( 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-        varcost = load( 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-        mucosts.append(mucost)
-        varcosts.append(varcost)
-        vallams.append(lam)
-        lam_costs[lam] = (mucost, varcost)
-    iters += 1
-
-x=[]
-y=[]
-iters = 0
-
-for lam in lams:
-    if (iters%1==0 and iters<=10) or (iters%5==0 and iters>10) or lam==lams[-1] :
-        y.append(lam_costs[lam])
-        x.append(lam)
-    iters +=1
-
-fig, ax1 = plt.subplots()
-
-# for xe, ye in zip(x, y):
-#     plt.scatter([xe] * len(ye), ye)
-ax2 = ax1.twinx()
-pdb.set_trace()
-ax1.scatter(vallams, mucosts)
-ax2.scatter(vallams, varcosts)
-
-
-# plt.xticks(list(np.arange(lams)))
-def major_formatter(x, pos):
-    return "[%.2f]" % x
-import matplotlib
-ax1.set_xticks([lams[0], lams[5], lams[10], lams[15], lams[20], lams[25], lams[30], lams[35], lams[40], lams[45], lams[-1]])
-ax1.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.1f'))
-# ax1.xaxis.set_ticks
-
-lns1 = ax1.plot(vallams, mucosts, label='Mean')
-lns2 = ax2.plot(vallams, varcosts, '--', label='Standard Deviation')
-
-
-# added these three lines
-lns = lns1+lns2
-labs = [l.get_label() for l in lns]
-
-box = ax1.get_position()
-ax1.set_position([box.x0, box.y0, box.width, box.height * 0.8])
-ax2.set_position([box.x0, box.y0, box.width , box.height* 0.8])
-
-
-ax1.legend(lns, labs, loc='center top', bbox_to_anchor=(1, 0.5))
-
-
-
-
-ax1.set_xlabel('Reliability Parameter')
-ax1.set_ylabel('Mean Cost')
-ax2.set_ylabel('Standard Deviation Cost')
-
-
-# plt.plot(lams, mucosts, label='Mean')
-# plt.plot(lams, varcosts, '-', label='Standard Deviation')
-# plt.legend(loc='upper right')
-# plt.xlabel('Value of Reliability')
-# plt.ylabel('Mean Cost')
-# plt.ylabel('Mean Cost')
-
-# ax2.set_ylabel('Y2 data', color='b')
-plt.savefig('plots/' + 'meanvsstd')
-# plt.show()
-#
-
-
-lams = np.linspace(0, 5, num=50)
-n = 250
-arcs = 2000
-mu=50
-var=50
-d_top = 1
-mucosts=[]
-varcosts=[]
-seed = 0
-lam_costs = {}
-iters = 0 
-vallams = []
-for lam in lams:
-    if (iters%1==0 and iters<=10) or (iters%5==0 and iters>10) or lam==lams[-1] :
-        lamstr = str(round(lam, 6))
-        lamstr = lamstr.replace('.','')
-
-        save_extension = str(mu) + str(var) + '_' + str(arcs) + '_' + str(seed) + str(d_top)
-
-        experiment_name = 'varying_lams'
-        mucost = load( 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-        varcost = load( 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-        mucosts.append(mucost)
-        varcosts.append(varcost)
-        vallams.append(lam)
-        lam_costs[lam] = (mucost, varcost)
-    iters += 1
-
-x=[]
-y=[]
-iters = 0
-
-for lam in lams:
-    if (iters%1==0 and iters<=10) or (iters%5==0 and iters>10) or lam==lams[-1] :
-        y.append(lam_costs[lam])
-        x.append(lam)
-    iters +=1
-
-fig, ax1 = plt.subplots()
-
-# for xe, ye in zip(x, y):
-#     plt.scatter([xe] * len(ye), ye)
-ax2 = ax1.twinx()
-pdb.set_trace()
-ax1.scatter(vallams, mucosts)
-ax2.scatter(vallams, varcosts)
-
-
-def major_formatter(x, pos):
-    return "[%.2f]" % x
-import matplotlib
-ax1.set_xticks([lams[0], lams[5], lams[10], lams[15], lams[20], lams[25], lams[30], lams[35], lams[40], lams[45], lams[-1]])
-ax1.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.1f'))
-# ax1.xaxis.set_ticks
-
-lns1 = ax1.plot(vallams, mucosts, label='Mean')
-lns2 = ax2.plot(vallams, varcosts, '--', label='Standard Deviation')
-
-
-# added these three lines
-lns = lns1+lns2
-labs = [l.get_label() for l in lns]
-ax1.legend(lns, labs, loc=1)
-
-
-ax1.set_xlabel('Value of Reliability')
-ax1.set_ylabel('Mean Cost')
-ax2.set_ylabel('Standard Deviation Cost')
-
-
-# plt.plot(lams, mucosts, label='Mean')
-# plt.plot(lams, varcosts, '-', label='Standard Deviation')
-# plt.legend(loc='upper right')
-# plt.xlabel('Value of Reliability')
-# plt.ylabel('Mean Cost')
-# plt.ylabel('Mean Cost')
-
-# ax2.set_ylabel('Y2 data', color='b')
-plt.savefig('plots/' + 'meanvsstd_8degree')
-# plt.show()
-#
-
-
-
-
-
-
-
-#
-nodes = [5000, 10000, 25000, 50000]
-### Experiment Analysis ###
-### Experiment 1 ###
-experiment_name = 'performance'
-lam = 0.7
-mu = 50
-d_top = 1
-variances = [20]
-
-seeds=8 * np.arange(10)
-
-# plt.figure()
-
-bx_nrtd = {}
-bx_btd = {}
-bx_nrbtd = {}
-bx_msktd = {}
-
-nr_time_dict = {}
-bs_time_dict = {}
-nrbs_time_dict = {}
-msk_time_dict = {}
-
-nr_gap_dict = {}
-bs_gap_dict = {}
-nrbs_gap_dict = {}
-msk_gap_dict = {}
-
-for n in nodes:
-    i = 0
-    arcs = n*4
-
-    nr_time_dict[n] = {}
-    bs_time_dict[n] = {}
-    nrbs_time_dict[n] = {}
-    msk_time_dict[n] = {}
-
-    nr_gap_dict[n] = {}
-    bs_gap_dict[n] = {}
-    nrbs_gap_dict[n] = {}
-    msk_gap_dict[n] = {}
-
-    bx_nrtd[n] = {}
-    bx_btd[n] = {}
-    bx_nrbtd[n] = {}
-    bx_msktd[n] = {}
-
-    for var in variances:
-        print(n, var)
-        i += 1
-
-        bx_nrtd[n][var] = []
-        bx_btd[n][var] = []
-        bx_nrbtd[n][var] = []
-        bx_msktd[n][var] = []
-
-
-        nr_gap_dict[n][var] = {}
-        bs_gap_dict[n][var] = {}
-        nrbs_gap_dict[n][var] = {}
-        msk_gap_dict[n][var] = {}
-
-        nr_time_dict[n][var] = {}
-        bs_time_dict[n][var] = {}
-        nrbs_time_dict[n][var] = {}
-        msk_time_dict[n][var] = {}
-
-        setup_times_cvx_l = []
-        solve_times_nr_l = []
-        solve_times_bs_l = []
-        solve_times_alg3_l = []
-
-        for seed in seeds:
-
-            if n == 50000:
-                if seed == 8:
-                    seed = 16
-                if seed == 9:
-                    continue
-            lamstr=str(lam)
-            lamstr = lamstr.replace(".","-")
-            if lam == 1:
-                lamstr_c = '1-0'
-            elif lam == 0.7:
-                lamstr_c = '0-7'
-            else:
-                lamstr_c = '0-1'
-
-            save_extension = lamstr + '_' + str(mu) + str(var) + '_' + str(arcs) + '_' + str(seed) + str(d_top)
-
-            times_alg3 = np.array(load('times_alg3' + save_extension, n, experiment_name))
-            times_nr = np.array(load('times_nr' + save_extension, n, experiment_name))
-            times_bs = np.array(load('times_bs' + save_extension, n, experiment_name))
-
-            logfilename = 'saved_runs/' + str(n) + '/' + experiment_name + lamstr_c + '_' + str(mu) + str(var) +  '_' + str(arcs) + '_' + str(seed)
-
-            log = read_log(logfilename)
-            overhead_time = np.array(load('mosek_overhead_time' + save_extension, n, experiment_name))
-            log = log[log['PRSTATUS']>=0.997]
-            log = log[log['PRSTATUS']<=1.003]
-            cvx_objs = log['POBJ'].tolist()
-            times_cvx = log['TIME'].tolist()
-            times_cvx = np.array(times_cvx) + overhead_time
-
-            bs_objs = np.array(load('bs_objs' + save_extension, n, experiment_name))
-            nr_objs = np.array(load('nr_objs' + save_extension, n, experiment_name))
-            alg3_objs = np.array(load('alg3_objs' + save_extension, n, experiment_name))
-
-            bs_min = min(bs_objs)
-            nr_min = min(nr_objs)
-            alg3_min = min(alg3_objs)
-            cvx_min = cvx_objs[-1]
-
-            benchmark = min(bs_min, nr_min, alg3_min, cvx_min)
-            descent_to = max(100*((nr_min/benchmark)-1), 100*((bs_min/benchmark)-1), 100*((alg3_min/benchmark)-1), 100*((cvx_min/benchmark)-1))
-
-            print('min percentage diff: %', descent_to)
-            # if descent_to > 1e-5:
-            #     pdb.set_trace()
-            # descent_to = min(descent_to, 1e-4)
-            # descent_to=1e-4
-
-            # bs_i = find_eq_obj_ind(bs_objs, benchmark, descent_to)
-            # nr_i = find_eq_obj_ind(nr_objs, benchmark, descent_to)
-            # alg3_i = find_eq_obj_ind(alg3_objs, benchmark, descent_to)
-
-            # nr_objs = nr_objs[:nr_i]
-            # bs_objs = bs_objs[:bs_i]
-            # alg3_objs = alg3_objs[:alg3_i]
-
-            # times_alg3 = times_alg3[:alg3_i]
-            # times_nr = times_nr[:nr_i]
-            # times_bs = times_bs[:bs_i]
-
-            gap_bs = abs(100*(np.array(bs_objs)/benchmark -1))
-            gap_nr = abs(100*(np.array(nr_objs)/benchmark -1))
-            gap_alg3 = abs(100*(np.array(alg3_objs)/benchmark -1))
-            gap_cvx = abs(100*(np.array(cvx_objs)/benchmark -1))
-            setup_times_cvx_l.append(times_cvx[-1])
-            solve_times_nr_l.append(times_nr[-1])
-            solve_times_bs_l.append(times_bs[-1])
-            solve_times_alg3_l.append(times_alg3[-1])
-
-            nr_time_dict[n][var][seed] = times_nr
-            nrbs_time_dict[n][var][seed] = times_alg3
-            bs_time_dict[n][var][seed] = times_bs
-            msk_time_dict[n][var][seed] = times_cvx
-
-            nr_gap_dict[n][var][seed] = gap_nr
-            nrbs_gap_dict[n][var][seed] = gap_alg3
-            bs_gap_dict[n][var][seed] = gap_bs
-            msk_gap_dict[n][var][seed] = gap_cvx
-
-            nr_time_dict[n][var][seed] = times_nr[1:]
-            nrbs_time_dict[n][var][seed] = times_alg3[1:]
-            bs_time_dict[n][var][seed] = times_bs[1:]
-
-            nr_gap_dict[n][var][seed] = gap_nr[1:]
-            nrbs_gap_dict[n][var][seed] = gap_alg3[1:]
-            bs_gap_dict[n][var][seed] = gap_bs[1:]
-
-        bx_nrtd[n][var] = solve_times_nr_l
-        bx_btd[n][var] = solve_times_bs_l
-        bx_nrbtd[n][var] = solve_times_alg3_l
-        bx_msktd[n][var] = setup_times_cvx_l
-
-n = 5000
-n2 = 10000  
-n3 = 25000
-n4 = 50000
-
-print(tabulate([['NR', np.mean(bx_nrtd[n][var]), np.mean(bx_nrtd[n2][var]), np.mean(bx_nrtd[n3][var]), np.mean(bx_nrtd[n4][var])],['NRBS', np.mean(bx_nrbtd[n][var]), np.mean(bx_nrbtd[n2][var]), np.mean(bx_nrbtd[n3][var]), np.mean(bx_nrbtd[n4][var])],['BS', np.mean(bx_btd[n][var]), np.mean(bx_btd[n2][var]), np.mean(bx_btd[n3][var]), np.mean(bx_btd[n4][var])],['MSK', np.mean(bx_msktd[n][var]), np.mean(bx_msktd[n2][var]), np.mean(bx_msktd[n3][var]), np.mean(bx_msktd[n4][var])]], headers=['n=5000', 'n=100000', 'n=25000', 'n=50000']))
-
-
-from scipy import stats
-sample_size = 10
-t_critical = stats.t.ppf(q = 0.9, df=sample_size)
-
-yer_nr = []
-yer_nrbs = []
-yer_bs = []
-yer_msk = []
-
-nr_bars = []
-nrbs_bars = []
-bs_bars = []
-msk_bars = []
-
-for n in [10000, 25000, 50000]:
-    nr_bars.append(np.mean(bx_nrtd[n][var]))
-    sample_stdev = np.std(bx_nrtd[n][var])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_nr.append(t_critical * sigma)
-
-    nrbs_bars.append(np.mean(bx_nrbtd[n][var]))
-    sample_stdev = np.std(bx_nrbtd[n][var])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_nrbs.append(t_critical * sigma)
-
-    bs_bars.append(np.mean(bx_btd[n][var]))
-    sample_stdev = np.std(bx_btd[n][var])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_bs.append(t_critical * sigma)
-
-    msk_bars.append(np.mean(bx_msktd[n][var]))
-    sample_stdev = np.std(bx_msktd[n][var])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_msk.append(t_critical * sigma)
-
-
-plt.figure()
-
-barWidth = 0.2
-rnr = np.arange(len(nr_bars))
-rnrbs = [x + barWidth for x in rnr]
-rbs = [x + 2*barWidth for x in rnr]
-rmsk = [x + 3*barWidth for x in rnr]
-
-plt.bar(rnr, nr_bars, width = barWidth, hatch='///', edgecolor = 'black', color='w', yerr=yer_nr, capsize=7, label='NR')
-plt.bar(rnrbs, nrbs_bars, width = barWidth, hatch='\\\\\\', edgecolor = 'black', color='w',yerr=yer_nrbs, capsize=7, label='NR-BSC')
-plt.bar(rbs, bs_bars, width = barWidth, hatch='xxx', edgecolor = 'black',color='w', yerr=yer_bs, capsize=7, label='BSC')
-plt.bar(rmsk, msk_bars, width = barWidth, hatch='...', edgecolor = 'black', color='w',yerr=yer_msk, capsize=7, label='MOSEK')
-plt.ylabel('Time(s)')
-plt.xticks([(r + 2*barWidth) for r in range(len(nr_bars))], ['10000', '25000', '50000'])
-plt.xlabel('# of Nodes')
-plt.legend()
-plt.tight_layout()
-plt.savefig('plots/' + 'comparison')
-
-
-
-
-
-
-
-
-nodes = [25000]
-### Experiment Analysis ###
-### Experiment 1 ###
-experiment_name = 'varying_lams_2'
-lams = [0.1, 0.5, 1, 5]
-mu = 50
-d_top = 1
-variances = [50]
-
-seeds=8 * np.arange(10)
-
-# plt.figure()
-
-bx_nrtd = {}
-bx_btd = {}
-bx_nrbtd = {}
-bx_msktd = {}
-
-nr_time_dict = {}
-bs_time_dict = {}
-nrbs_time_dict = {}
-msk_time_dict = {}
-
-nr_gap_dict = {}
-bs_gap_dict = {}
-nrbs_gap_dict = {}
-msk_gap_dict = {}
-var=50
-for n in nodes:
-    i = 0
-    arcs = n*4
-
-    nr_time_dict[n] = {}
-    bs_time_dict[n] = {}
-    nrbs_time_dict[n] = {}
-    msk_time_dict[n] = {}
-
-    nr_gap_dict[n] = {}
-    bs_gap_dict[n] = {}
-    nrbs_gap_dict[n] = {}
-    msk_gap_dict[n] = {}
-
-    bx_nrtd[n] = {}
-    bx_btd[n] = {}
-    bx_nrbtd[n] = {}
-    bx_msktd[n] = {}
+from utils import *
+import numpy as np
+from matplotlib.ticker import FormatStrFormatter
+from matplotlib.ticker import ScalarFormatter
+import matplotlib.ticker as mtick
+
+
+def am_i_close(a, b, perc_rel_tol):
+    if 100*abs(a - b) / min(a, b) <= perc_rel_tol:
+        return True
+    else:
+        return False
+
+def save_fig(fig_id, tight_layout=False, fig_extension="png", resolution=300):
+    path = os.path.join(PLOTS_PATH, fig_id + "." + fig_extension)
+    print("Saving figure", fig_id)
+
+    if tight_layout:
+        plt.tight_layout()
+    plt.savefig(path, format=fig_extension, dpi=resolution)
+
+def mean_std(array):
+
+    mean = np.nanmean(np.where(array != 0, array, np.nan), 1)
+    std = np.nanstd(np.where(array != 0, array, np.nan), 1)
+    print(mean)
+    return mean, std
+
+def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_iters_, cplex_infeas_):
+    node_num = [4096, 8192, 8192*2, 8192*4]
+    node_num = [r'$2^{12}$', r'$2^{13}$', r'$2^{14}$', r'$2^{15}$']
+    print(family_name)
+
+    print('cplex')
+    cplex_mean, cplex_std = mean_std(cplex_times)
+    print('nr')
+    nr_mean, nr_std = mean_std(nr_times)
+    print('bsc')
+    bsc_mean, bsc_std = mean_std(bsc_times)
+
+    print(cplex_infeas_, nr_iters_, bs_iters_)
+    plt.plot(node_num, cplex_mean, 'b--o',
+             linewidth=1, label='CPLEX', markersize=4)
+    plt.plot(node_num, bsc_mean, 'r--^',
+             linewidth=1, label='BSC', markersize=4)
+    plt.plot(node_num, nr_mean, 'g--s', linewidth=1, label='NR', markersize=4)
+
+    plt.text(node_num[0], cplex_mean[0], 'CPLEX')
+    plt.text(node_num[0], nr_mean[0], 'NR')
+    plt.text(node_num[0], bsc_mean[0], 'BSC')
+
+    # plt.fill_between(node_num, cplex_mean - cplex_std, cplex_mean + cplex_std, facecolor='blue', alpha=0.1);
+    # plt.fill_between(node_num, nr_mean - nr_std, nr_mean + nr_std, facecolor='green', alpha=0.1);
+    # plt.fill_between(node_num, bsc_mean - bsc_std, bsc_mean + bsc_std, facecolor='red', alpha=0.1);
+
+    plt.ylabel('Running time (logscale)', fontsize=12)
+    plt.xlabel('Number of nodes', fontsize=12)
+    plt.yscale('log')
+
+    if family_name.lower().find('sr') >= 0:
+        plt.ylim(top=1e4)
+        plt.ylim(bottom=1e0)
+
+
+    else:
+        plt.ylim(top=1e4)
+        plt.ylim(bottom=1e0)
+
+    plt.grid(True)
+    plt.title(family_name, fontsize=12)
+    plt.legend(loc='upper left', fontsize=10)
+
+def graph_base_vs_reliable():
+
+    experiment = 'base_vs_reliable'
+    lams = np.logspace(-1, 3, 200)
+    lams = [lams[i] for i in range(len(lams)) if i%4==0]
+    exponent = '10'
+    tail = 'e'
+    base = 'netgen'
+    atype = '_8_'
+
+    rel_mean = []
+    rel_std = []
+    rel_obj = []
+    base_obj = []
 
     for lam in lams:
-        i += 1
 
-        bx_nrtd[n][lam] = []
-        bx_btd[n][lam] = []
-        bx_nrbtd[n][lam] = []
-        bx_msktd[n][lam] = []
+        lam_dir = str(lam).replace('.', '_')
+
+        filename = experiment + '/' + base + '/' + \
+                    base + atype + exponent + tail + '_' + lam_dir
+        data_dic = load_run(filename)
+
+        rel_mean.append(data_dic['rel_mean'])
+        rel_std.append(data_dic['rel_std'])
+        rel_obj.append(data_dic['solver_obj'])
+        base_obj.append(data_dic['base_obj'])
+
+    fig, ax1 = plt.subplots()
+
+    rel_mean = np.array(rel_mean)/1e6
+    rel_std = np.array(rel_std)/1e6
+
+    ax1.set_xlabel(r'$\bar{\lambda}$')
+    ax1.set_ylabel('Mean (' + r'$10^6$' + ')')
+    ax1.plot(lams, rel_mean, 'b--+', linewidth=1, label='mean', markersize=4)
+    ax1.tick_params(axis='y')
 
 
-        nr_gap_dict[n][lam] = {}
-        bs_gap_dict[n][lam] = {}
-        nrbs_gap_dict[n][lam] = {}
-        msk_gap_dict[n][lam] = {}
+    ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
 
-        nr_time_dict[n][lam] = {}
-        bs_time_dict[n][lam] = {}
-        nrbs_time_dict[n][lam] = {}
-        msk_time_dict[n][lam] = {}
+    ax2.set_ylabel('Std. Dev. (' + r'$10^6$' + ')')  # we already handled the x-label with ax1
+    ax2.plot(lams, rel_std, 'r-+', linewidth=1, label='std', markersize=4)
 
-        setup_times_cvx_l = []
-        solve_times_nr_l = []
-        solve_times_bs_l = []
-        solve_times_alg3_l = []
+    ax2.tick_params(axis='y')
 
-        for seed in seeds:
 
-            lamstr=str(lam)
-            lamstr = lamstr.replace(".","-")
+    plt.grid(True)
+    ax1.legend(loc='lower left', bbox_to_anchor= (0.0, 1.01), ncol=2,
+            borderaxespad=0, frameon=False)
+    ax2.legend(loc='lower right', bbox_to_anchor= (0.4, 1.01), ncol=2,
+            borderaxespad=0, frameon=False)
 
-            if lam == 1:
-                lamstr_c = '1-0'
-            elif lam == 5:
-                lamstr_c = '5-0'
-            elif lam == 0.5:
-                lamstr_c = '0-5'
-            else:
-                lamstr_c = '0-1'
+    fig.tight_layout()  
+    # ax1.set_xscale('log')
+    # ax2.set_xscale('log')
 
-            print(lam, lamstr_c)
+    save_fig('mean_std_tradeoff')
+    plt.clf()
 
-            save_extension = lamstr_c + '_' + str(mu) + str(var) + '_' + str(arcs) + '_' + str(seed) + str(d_top)
+    rel_gap = []
+    for i in range(len(rel_obj)):
+        rel_gap.append(100*abs(base_obj[i] - rel_obj[i])/min(base_obj[i], rel_obj[i]))
 
-            times_alg3 = np.array(load('times_alg3' + save_extension, n, experiment_name))
-            times_nr = np.array(load('times_nr' + save_extension, n, experiment_name))
-            times_bs = np.array(load('times_bs' + save_extension, n, experiment_name))
-            if lam==5:
-                lamstr_c = str(5)
+    plt.plot(lams, rel_gap , 'k--+', linewidth=1, label='gap', markersize=4)
+    plt.ylabel('Relative Objective Gap', fontsize=10)
+    plt.xlabel(r'$\bar{\lambda}$', fontsize=10)
+    ax = plt.gca()
+    ax.yaxis.set_major_formatter(mtick.PercentFormatter(decimals=0))
+    # plt.yscale('log')
+    # plt.xscale('log')
+    plt.grid(True)
 
+    save_fig('obj_tradeoff')
+    plt.clf()
+
+def graph_gap_levels():
+    
+
+    experiment = 'graph_families'
+
+    bases = ['netgen'] 
+    tails = ['e']
+    exponents = (np.arange(14, 15)).astype(str)
+    types = ['_lo_sr_']
+
+
+    for base in bases:
+
+        i = 0
+        for atype in types:
+
+            i += 1
+            for exponent in exponents:
+                bs_iter_list = []
+                nr_iter_list = []
+                cplex_infeas_list = []
+                j = 0
+
+                for tail in tails:
+                    row = np.where(exponents == exponent)[0][0]
+                    col = j
+
+                    cut_idx = None
+                    weird = False
+                    network = base + atype + exponent + tail
+                    filename = experiment + '/' + base + '/' + network
+                    data_dic = load_run(filename)
+                    cplex_obj = data_dic['solver_obj']
+
+                    cplex_iter_objs = data_dic['solver_primals']
+                    cplex_iter_times = data_dic['solver_iter_times']
+                    cplex_feasible = data_dic['solver_feasible']
+
+                    cplex_iter_objs[-1] = cplex_obj
+
+                    nr_iter_objs = data_dic['nr_iter_objs']
+                    nr_iter_elapsed = data_dic['nr_iter_elapsed']
+
+                    bs_iter_objs = data_dic['bs_iter_objs']
+                    bs_iter_elapsed = data_dic['bs_iter_elapsed']
+
+                    lb_elapsed = data_dic['elapsed_lower_bound']
+                    ub_elapsed = data_dic['elapsed_upper_bound']
+
+                    nr_iter_elapsed = lb_elapsed + np.array(nr_iter_elapsed)
+                    bs_iter_elapsed = lb_elapsed + \
+                        ub_elapsed + np.array(bs_iter_elapsed)
+
+                    for _ind in range(len(cplex_iter_objs) - 1, 0, -1):
+                        if not am_i_close(cplex_iter_objs[_ind], cplex_iter_objs[_ind - 1], perc_rel_tol=1e-7):
+                            cplex_iter_objs = cplex_iter_objs[:_ind + 1]
+                            cplex_iter_times = cplex_iter_times[:_ind + 1]
+                            break
+
+                    plt.figure(figsize=(16,8))
                     
-            logfilename = 'saved_runs/' + str(n) + '/' + experiment_name + lamstr_c + '_' + str(mu) + str(var) +  '_' + str(arcs) + '_' + str(seed)
+                    best_known = min(min(nr_iter_objs), min(bs_iter_objs), cplex_iter_objs[-1])
 
-            log = read_log(logfilename)
-            overhead_time = np.array(load('mosek_overhead_time' + save_extension, n, experiment_name))
-            log = log[log['PRSTATUS']>=0.997]
-            log = log[log['PRSTATUS']<=1.003]
-            cvx_objs = log['POBJ'].tolist()
-            times_cvx = log['TIME'].tolist()
-            times_cvx = np.array(times_cvx) + overhead_time
+                    def to_arr(sequence):
+                        return np.array(sequence)
 
-            bs_objs = np.array(load('bs_objs' + save_extension, n, experiment_name))
-            nr_objs = np.array(load('nr_objs' + save_extension, n, experiment_name))
-            alg3_objs = np.array(load('alg3_objs' + save_extension, n, experiment_name))
+                    nr_iter_objs = to_arr(nr_iter_objs)
+                    bs_iter_objs = to_arr(bs_iter_objs)
+                    cplex_iter_objs = to_arr(cplex_iter_objs)
 
-            bs_min = min(bs_objs)
-            nr_min = min(nr_objs)
-            alg3_min = min(alg3_objs)
-            cvx_min = cvx_objs[-1]
+                    def prep(seq):
+                        seq = abs(seq - best_known)
+                        seq *= 100
+                        seq /= best_known
+                        return seq
 
-            print(cvx_min, nr_min, bs_min, alg3_min)
+                    nr_iter_objs = prep(nr_iter_objs)
+                    bs_iter_objs = prep(bs_iter_objs)
+                    cplex_iter_objs = prep(cplex_iter_objs)
 
-            benchmark = min(bs_min, nr_min, alg3_min, cvx_min)
-            descent_to = max(100*((nr_min/benchmark)-1), 100*((bs_min/benchmark)-1), 100*((alg3_min/benchmark)-1), 100*((cvx_min/benchmark)-1))
+                    plt.plot(nr_iter_elapsed, nr_iter_objs,'g--s', linewidth=1, label='NR')
+                    plt.plot(bs_iter_elapsed, bs_iter_objs,'r--^', linewidth=1, label='BSC')
+                    plt.plot(cplex_iter_times, cplex_iter_objs,'b--o', linewidth=1, label='CPLEX')
 
-            print('min percentage diff: %', descent_to)
-            # if descent_to > 1e-5:
-            #     pdb.set_trace()
-            # descent_to = min(descent_to, 1e-4)
-            # descent_to=1e-4
+                    # plt.plot([0, nr_times_e[tail][0]], [nr_objs_e[tail][
+                    #          0], nr_objs_e[tail][0]], "k:")  # Not shown
+                    # plt.plot([nr_times_e[tail][0], nr_times_e[tail][0]], [
+                    #          1e-10, nr_objs_e[tail][0]], "k:")  # Not shown
+                    # plt.plot([nr_times_e[tail][0], nr_times_e[tail][0]], [
+                    #          1e-10, cplex_objs_e[tail][6]], "k:")  # Not shown
+                    # plt.plot([0, nr_times_e[tail][0]], [cplex_objs_e[tail][
+                    #          6], cplex_objs_e[tail][6]], "k:")  # Not shown
+                    # plt.plot([7813], [0.9], "ko")                   # Not shown
 
-            # bs_i = find_eq_obj_ind(bs_objs, benchmark, descent_to)
-            # nr_i = find_eq_obj_ind(nr_objs, benchmark, descent_to)
-            # alg3_i = find_eq_obj_ind(alg3_objs, benchmark, descent_to)
+                    plt.ylabel('Relative Objective Gap % (logscale)', fontsize=12)
+                    plt.yscale('log')
+                    plt.ylim(bottom=1e-5)
 
-            # nr_objs = nr_objs[:nr_i]
-            # bs_objs = bs_objs[:bs_i]
-            # alg3_objs = alg3_objs[:alg3_i]
+                    plt.xlabel('Running time', fontsize=12)
+                    plt.grid(True)
+                    plt.legend(loc='upper right', fontsize=10)
 
-            # times_alg3 = times_alg3[:alg3_i]
-            # times_nr = times_nr[:nr_i]
-            # times_bs = times_bs[:bs_i]
+                    save_fig('gap_level')
+                    plt.clf()
 
-            gap_bs = abs(100*(np.array(bs_objs)/benchmark -1))
-            gap_nr = abs(100*(np.array(nr_objs)/benchmark -1))
-            gap_alg3 = abs(100*(np.array(alg3_objs)/benchmark -1))
-            gap_cvx = abs(100*(np.array(cvx_objs)/benchmark -1))
+def graph_comparison():
 
-            setup_times_cvx_l.append(times_cvx[-1])
-            solve_times_nr_l.append(times_nr[-1])
-            solve_times_bs_l.append(times_bs[-1])
-            solve_times_alg3_l.append(times_alg3[-1])
+    experiment = 'graph_families'
 
-            nr_time_dict[n][lam][seed] = times_nr
-            nrbs_time_dict[n][lam][seed] = times_alg3
-            bs_time_dict[n][lam][seed] = times_bs
-            msk_time_dict[n][lam][seed] = times_cvx
+    bases = ['netgen'] 
+    tails = ['a','b','c','d','e']
+    exponents = (np.arange(12, 16)).astype(str)
+    types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
+    temp_tails = ['a','b','c','d','e']
 
-            nr_gap_dict[n][lam][seed] = gap_nr
-            nrbs_gap_dict[n][lam][seed] = gap_alg3
-            bs_gap_dict[n][lam][seed] = gap_bs
-            msk_gap_dict[n][lam][seed] = gap_cvx
+    for base in bases:
+        plt.figure(figsize=(16, 8))
 
-            nr_time_dict[n][lam][seed] = times_nr[1:]
-            nrbs_time_dict[n][lam][seed] = times_alg3[1:]
-            bs_time_dict[n][lam][seed] = times_bs[1:]
+        i = 0
+        for atype in types:
 
-            nr_gap_dict[n][lam][seed] = gap_nr[1:]
-            nrbs_gap_dict[n][lam][seed] = gap_alg3[1:]
-            bs_gap_dict[n][lam][seed] = gap_bs[1:]
+            if base == 'goto' and atype.find('lo') > 0:
+                continue
+            i += 1
+            if base == 'netgen':
+                perc_rel_tol = 1e-3
 
-        bx_nrtd[n][lam] = solve_times_nr_l
-        bx_btd[n][lam] = solve_times_bs_l
-        bx_nrbtd[n][lam] = solve_times_alg3_l
-        bx_msktd[n][lam] = setup_times_cvx_l
-
-lam = 0.1
-lam2 = 0.5  
-lam3 = 1
-lam4 = 5
-pdb.set_trace()
-# print(tabulate([['NR', np.mean(bx_nrtd[n][var]), np.mean(bx_nrtd[n2][var]), np.mean(bx_nrtd[n3][var]), np.mean(bx_nrtd[n4][var])],['NRBS', np.mean(bx_nrbtd[n][var]), np.mean(bx_nrbtd[n2][var]), np.mean(bx_nrbtd[n3][var]), np.mean(bx_nrbtd[n4][var])],['BS', np.mean(bx_btd[n][var]), np.mean(bx_btd[n2][var]), np.mean(bx_btd[n3][var]), np.mean(bx_btd[n4][var])],['MSK', np.mean(bx_msktd[n][var]), np.mean(bx_msktd[n2][var]), np.mean(bx_msktd[n3][var]), np.mean(bx_msktd[n4][var])]], headers=['n=5000', 'n=100000', 'n=25000', 'n=50000']))
-
-print(tabulate([['NR', np.mean(bx_nrtd[n][lam]), np.mean(bx_nrtd[n][lam2]), np.mean(bx_nrtd[n][lam3]), np.mean(bx_nrtd[n][lam4])],['NRBS', np.mean(bx_nrbtd[n][lam]), np.mean(bx_nrbtd[n][lam2]), np.mean(bx_nrbtd[n][lam3]), np.mean(bx_nrbtd[n][lam4])],['BS', np.mean(bx_btd[n][lam]), np.mean(bx_btd[n][lam2]), np.mean(bx_btd[n][lam3]), np.mean(bx_btd[n][lam4])],['MSK', np.mean(bx_msktd[n][lam]), np.mean(bx_msktd[n][lam2]), np.mean(bx_msktd[n][lam3]), np.mean(bx_msktd[n][lam4])]], headers=['lam1=0.1', 'lam2=0.5', 'lam3=1', 'lam4=5']))
-
-
-from scipy import stats
-sample_size = 10
-t_critical = stats.t.ppf(q = 0.9, df=sample_size)
-
-yer_nr = []
-yer_nrbs = []
-yer_bs = []
-yer_msk = []
-
-nr_bars = []
-nrbs_bars = []
-bs_bars = []
-msk_bars = []
-
-for lam in lams:
-    nr_bars.append(np.mean(bx_nrtd[n][lam]))
-    sample_stdev = np.std(bx_nrtd[n][lam])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_nr.append(t_critical * sigma)
-
-    nrbs_bars.append(np.mean(bx_nrbtd[n][lam]))
-    sample_stdev = np.std(bx_nrbtd[n][lam])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_nrbs.append(t_critical * sigma)
-
-    bs_bars.append(np.mean(bx_btd[n][lam]))
-    sample_stdev = np.std(bx_btd[n][lam])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_bs.append(t_critical * sigma)
-
-    msk_bars.append(np.mean(bx_msktd[n][lam]))
-    sample_stdev = np.std(bx_msktd[n][lam])    # Get the sample standard deviation
-    sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-    yer_msk.append(t_critical * sigma)
-
-
-plt.figure()
-
-barWidth = 0.2
-rnr = np.arange(len(nr_bars))
-rnrbs = [x + barWidth for x in rnr]
-rbs = [x + 2*barWidth for x in rnr]
-rmsk = [x + 3*barWidth for x in rnr]
-
-plt.gca().set_title('25000 Nodes')
-plt.bar(rnr, nr_bars, width = barWidth, hatch='///', edgecolor = 'black', color='w', yerr=yer_nr, capsize=7, label='NR')
-plt.bar(rnrbs, nrbs_bars, width = barWidth, hatch='\\\\\\', edgecolor = 'black', color='w',yerr=yer_nrbs, capsize=7, label='NR-BSC')
-plt.bar(rbs, bs_bars, width = barWidth, hatch='xxx', edgecolor = 'black',color='w', yerr=yer_bs, capsize=7, label='BSC')
-plt.bar(rmsk, msk_bars, width = barWidth, hatch='...', edgecolor = 'black', color='w',yerr=yer_msk, capsize=7, label='MOSEK')
-plt.ylabel('Time(s)')
-plt.xticks([(r + 2*barWidth) for r in range(len(nr_bars))], ['0.1', '0.5', '1', '5'])
-plt.xlabel('Lambda')
-plt.legend()
-plt.tight_layout()
-plt.savefig('plots/' + 'something')
-
-
-
-
-
-
-
-
-
-
-
-nodes = [25000]
-var = 20
-lam = 0.7
-for n in nodes:
-    i = 0
-    arcs = [n*2, n*4, n*8]
-
-
-    nr_time_dict[n] = {}
-    bs_time_dict[n] = {}
-    nrbs_time_dict[n] = {}
-    msk_time_dict[n] = {}
-
-    nr_gap_dict[n] = {}
-    bs_gap_dict[n] = {}
-    nrbs_gap_dict[n] = {}
-    msk_gap_dict[n] = {}
-
-    bx_nrtd[n] = {}
-    bx_btd[n] = {}
-    bx_nrbtd[n] = {}
-    bx_msktd[n] = {}
-
-    for arc in arcs:
-        experiment_name = 'network_density'
-
-        if arc == n*4:
-            experiment_name = 'performance'
-        
-        print(n, arc)
-        i += 1
-
-        bx_nrtd[n][arc] = []
-        bx_btd[n][arc] = []
-        bx_nrbtd[n][arc] = []
-        bx_msktd[n][arc] = []
-
-
-        nr_gap_dict[n][arc] = {}
-        bs_gap_dict[n][arc] = {}
-        nrbs_gap_dict[n][arc] = {}
-        msk_gap_dict[n][arc] = {}
-
-        nr_time_dict[n][arc] = {}
-        bs_time_dict[n][arc] = {}
-        nrbs_time_dict[n][arc] = {}
-        msk_time_dict[n][arc] = {}
-
-        setup_times_cvx_l = []
-        solve_times_nr_l = []
-        solve_times_bs_l = []
-        solve_times_alg3_l = []
-
-        for seed in seeds:
-
-            lamstr=str(lam)
-            lamstr = lamstr.replace(".","-")
-            if lam == 1:
-                lamstr_c = '1-0'
-            elif lam == 0.7:
-                lamstr_c = '0-7'
+                figure_grid = 220
+                plt.subplot(figure_grid + i)
             else:
-                lamstr_c = '0-1'
-
-            save_extension = lamstr + '_' + str(mu) + str(var) + '_' + str(arc) + '_' + str(seed) + str(d_top)
-
-            times_alg3 = np.array(load('times_alg3' + save_extension, n, experiment_name))
-            times_nr = np.array(load('times_nr' + save_extension, n, experiment_name))
-            times_bs = np.array(load('times_bs' + save_extension, n, experiment_name))
-
-            logfilename = 'saved_runs/' + str(n) + '/' + experiment_name + lamstr_c + '_' + str(mu) + str(var) +  '_' + str(arc) + '_' + str(seed)
-            log = read_log(logfilename)
-            overhead_time = np.array(load('mosek_overhead_time' + save_extension, n, experiment_name))
-            log = log[log['PRSTATUS']>=0.997]
-            log = log[log['PRSTATUS']<=1.003]
-            cvx_objs = log['POBJ'].tolist()
-            times_cvx = log['TIME'].tolist()
-            times_cvx = np.array(times_cvx) + overhead_time
-
-            bs_objs = np.array(load('bs_objs' + save_extension, n, experiment_name))
-            nr_objs = np.array(load('nr_objs' + save_extension, n, experiment_name))
-            alg3_objs = np.array(load('alg3_objs' + save_extension, n, experiment_name))
-
-            bs_min = min(bs_objs)
-            nr_min = min(nr_objs)
-            alg3_min = min(alg3_objs)
-            cvx_min = cvx_objs[-1]
-
-            benchmark = min(bs_min, nr_min, alg3_min, cvx_min)
-            descent_to = max(100*((nr_min/benchmark)-1), 100*((bs_min/benchmark)-1), 100*((alg3_min/benchmark)-1), 100*((cvx_min/benchmark)-1))
-
-            print('min percentage diff: %', descent_to)
-
-            bs_i = -1 #find_eq_obj_ind(bs_objs, benchmark, descent_to)
-            nr_i = -1 #find_eq_obj_ind(nr_objs, benchmark, descent_to)
-            alg3_i = -1 #find_eq_obj_ind(alg3_objs, benchmark, descent_to)
-
-            nr_objs = nr_objs[:nr_i]
-            bs_objs = bs_objs[:bs_i]
-            alg3_objs = alg3_objs[:alg3_i]
-
-            times_alg3 = times_alg3[:alg3_i]
-            times_nr = times_nr[:nr_i]
-            times_bs = times_bs[:bs_i]
-
-            gap_bs = abs(100*(np.array(bs_objs)/benchmark -1))
-            gap_nr = abs(100*(np.array(nr_objs)/benchmark -1))
-            gap_alg3 = abs(100*(np.array(alg3_objs)/benchmark -1))
-            gap_cvx = abs(100*(np.array(cvx_objs)/benchmark -1))
-            setup_times_cvx_l.append(times_cvx[-1])
-            solve_times_nr_l.append(times_nr[-1])
-            solve_times_bs_l.append(times_bs[-1])
-            solve_times_alg3_l.append(times_alg3[-1])
-
-            nr_time_dict[n][arc][seed] = times_nr
-            nrbs_time_dict[n][arc][seed] = times_alg3
-            bs_time_dict[n][arc][seed] = times_bs
-            msk_time_dict[n][arc][seed] = times_cvx
-
-            nr_gap_dict[n][arc][seed] = gap_nr
-            nrbs_gap_dict[n][arc][seed] = gap_alg3
-            bs_gap_dict[n][arc][seed] = gap_bs
-            msk_gap_dict[n][arc][seed] = gap_cvx
-
-        bx_nrtd[n][arc] = solve_times_nr_l
-        bx_btd[n][arc] = solve_times_bs_l
-        bx_nrbtd[n][arc] = solve_times_alg3_l
-        bx_msktd[n][arc] = setup_times_cvx_l
-
-
-
-plt.figure()
-
-# var = 0.7
-
-# two_bars= []
-# yer_2brs = []
-# four_bars =[]
-# yer_4brs =[]
-# eight_bars =[]
-# yer_8brs =[]
-
-# yer_nr = []
-# yer_nrbs = []
-# yer_bs = []
-# yer_msk = []
-
-# nr_bars = []
-# nrbs_bars = []
-# bs_bars = []
-# msk_bars = []
-
-
-# for n in [10000]:
-#     arcs = [n*2, n*4, n*8]
-#     for arc in arcs:
-#         # if arc == n*2:
-#         nr_bars.append(np.mean(bx_nrtd[n][arc]))
-#         sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-#         sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         yer_nr.append(t_critical * sigma)
-
-#         bs_bars.append(np.mean(bx_btd[n][arc]))
-#         sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-#         sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         yer_bs.append(t_critical * sigma)
-
-#         nrbs_bars.append(np.mean(bx_nrbtd[n][arc]))
-#         sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-#         sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         yer_nrbs.append(t_critical * sigma)
-
-#         msk_bars.append(np.mean(bx_msktd[n][arc]))
-#         sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-#         sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         yer_msk.append(t_critical * sigma)
-#         # elif arc == n*4:
-#         #     four_bars.append(np.mean(bx_nrtd[n][arc]))
-#         #     sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_4brs.append(t_critical * sigma)
-
-#         #     four_bars.append(np.mean(bx_btd[n][arc]))
-#         #     sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_4brs.append(t_critical * sigma)
-
-#         #     four_bars.append(np.mean(bx_nrbtd[n][arc]))
-#         #     sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_4brs.append(t_critical * sigma)
-
-
-
-#         #     four_bars.append(np.mean(bx_msktd[n][arc]))
-#         #     sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_4brs.append(t_critical * sigma)
-#         # else:
-#         #     eight_bars.append(np.mean(bx_nrtd[n][arc]))
-#         #     sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_8brs.append(t_critical * sigma)
-
-#         #     eight_bars.append(np.mean(bx_btd[n][arc]))
-#         #     sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_8brs.append(t_critical * sigma)
-
-#         #     eight_bars.append(np.mean(bx_nrbtd[n][arc]))
-#         #     sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_8brs.append(t_critical * sigma)
-
-#         #     eight_bars.append(np.mean(bx_msktd[n][arc]))
-#         #     sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-#         #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-#         #     yer_8brs.append(t_critical * sigma)
-
-
-# r2 = np.arange(len(two_bars))
-# # r4 = [x + barWidth for x in r2]
-# r8 = [x + 2*barWidth for x in r2]
-
-
-barWidth = 0.2
-rnr = np.arange(len(nr_bars))
-rnrbs = [x + barWidth for x in rnr]
-rbs = [x + 2*barWidth for x in rnr]
-rmsk = [x + 3*barWidth for x in rnr]
-#
- # color = 'red',
-# plt.bar(rnr, nr_bars, width = barWidth,  edgecolor = 'black', yerr=yer_nr, capsize=7, label='NR')
-# plt.bar(rbs, bs_bars, width = barWidth,  edgecolor = 'black', yerr=yer_bs, capsize=7, label='BSC')
-# plt.bar(rnrbs, nrbs_bars, width = barWidth,  edgecolor = 'black', yerr=yer_nrbs, capsize=7, label='NR-BSC')
-# plt.bar(rmsk, msk_bars, width = barWidth, edgecolor = 'black', yerr=yer_msk, capsize=7, label='MOSEK')
-# plt.ylabel('Time(s)')
-# plt.xticks([(r + 3*barWidth) for r in range(len(nr_bars))], ['5000', '10000', '25000'])
-# plt.xlabel('# of Nodes')
-# plt.legend()
-# plt.tight_layout()
-# plt.savefig('plots/' + 'comparison')
-# ax = plt.subplot(2, 1, 1)
-# plt.gca().set_title('10000 Nodes')
-
-
-# plt.bar(rnr, nr_bars, width = barWidth, hatch='///', edgecolor = 'black', color='w', yerr=yer_nr, capsize=7, label='NR')
-# plt.bar(rnrbs, nrbs_bars, width = barWidth, hatch='\\\\\\', edgecolor = 'black', color='w',yerr=yer_nrbs, capsize=7, label='NR-BSC')
-# plt.bar(rbs, bs_bars, width = barWidth, hatch='xxx', edgecolor = 'black',color='w', yerr=yer_bs, capsize=7, label='BSC')
-# plt.bar(rmsk, msk_bars, width = barWidth, hatch='...', edgecolor = 'black', color='w',yerr=yer_msk, capsize=7, label='MOSEK')
-
-# plt.bar(rnr, two_bars, width = barWidth, color = 'cyan', edgecolor = 'black', yerr=yer_2brs[0], capsize=3, label='NR')
-# plt.bar(rbs, two_bars[1], width = barWidth, color = 'cyan', edgecolor = 'black', yerr=yer_2brs[1], capsize=3, label='BSC')
-# plt.bar(rnrbs, two_bars[2] , width = barWidth, color = 'cyan', edgecolor = 'black', yerr=yer_2brs[2], capsize=3, label='NR-BSC')
-# plt.bar(rmsk, two_bars[3], width = barWidth, color = 'cyan', edgecolor = 'black', yerr=yer_2brs[3], capsize=3, label='MSK')
-
-# plt.ylabel('Time(s)')
-# plt.xticks([(r + 2*barWidth) for r in range(len(nr_bars))], ['2', '4', '8'])
-# plt.xlabel('Average Degree of Nodes')
-# plt.tight_layout()
-# plt.legend()
-# plt.savefig('plots/' + str(n) + 'densityfig10kn')
-
-
-
-# plt.bar(r2, two_bars, width = barWidth, color = 'cyan', edgecolor = 'black', yerr=yer_2brs, capsize=3)
-# plt.bar(r4, four_bars, width = barWidth, color = 'orange', edgecolor = 'black', yerr=yer_4brs, capsize=3)
-# plt.bar(r8, eight_bars, width = barWidth, color = 'purple', edgecolor = 'black', yerr=yer_8brs, capsize=3)
-# plt.ylabel('Time(s)')
-# plt.xticks([r for r in range(len(r4))], ['NR', 'BSC', 'NR-BSC', 'MSK'])
-# plt.xlabel('Algorithm')
-# plt.tight_layout()
-# plt.legend()
-# plt.savefig('plots/' + str(n) + 'densityfig')
-
-
-# print(tabulate([['NR', (100*eight_bars[0]/two_bars[0]) - 100], ['BS', (100*eight_bars[1]/two_bars[1]) - 100], ['NRBS', (100*eight_bars[2]/two_bars[2]) - 100],['MSK', (100*eight_bars[3]/two_bars[3]) - 100]], headers=['%inc']))
-# print(tabulate([['NR', (100*four_bars[0]/two_bars[0]) - 100], ['BS', (100*four_bars[1]/two_bars[1]) - 100], ['NRBS', (100*four_bars[2]/two_bars[2]) - 100],['MSK', (100*four_bars[3]/two_bars[3]) - 100]], headers=['%inc']))
-
-
-yer_nr = []
-yer_nrbs = []
-yer_bs = []
-yer_msk = []
-
-nr_bars = []
-nrbs_bars = []
-bs_bars = []
-msk_bars = []
-
-
-for n in [25000]:
-    arcs = [n*2, n*4, n*8]
-    for arc in arcs:
-        # if arc == n*2:
-        nr_bars.append(np.mean(bx_nrtd[n][arc]))
-        sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-        sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        yer_nr.append(t_critical * sigma)
-
-        bs_bars.append(np.mean(bx_btd[n][arc]))
-        sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-        sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        yer_bs.append(t_critical * sigma)
-
-        nrbs_bars.append(np.mean(bx_nrbtd[n][arc]))
-        sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-        sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        yer_nrbs.append(t_critical * sigma)
-
-        msk_bars.append(np.mean(bx_msktd[n][arc]))
-        sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-        sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        yer_msk.append(t_critical * sigma)
-            # two_bars.append(np.mean(bx_nrtd[n][arc]))
-            # sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-            # sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-            # yer_2brs.append(t_critical * sigma)
-
-            # two_bars.append(np.mean(bx_btd[n][arc]))
-            # sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-            # sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-            # yer_2brs.append(t_critical * sigma)
-
-            # two_bars.append(np.mean(bx_nrbtd[n][arc]))
-            # sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-            # sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-            # yer_2brs.append(t_critical * sigma)
-
-            # two_bars.append(np.mean(bx_msktd[n][arc]))
-            # sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-            # sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-            # yer_2brs.append(t_critical * sigma)
-        # elif arc == n*4:
-        #     four_bars.append(np.mean(bx_nrtd[n][arc]))
-        #     sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_4brs.append(t_critical * sigma)
-
-        #     four_bars.append(np.mean(bx_btd[n][arc]))
-        #     sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_4brs.append(t_critical * sigma)
-
-        #     four_bars.append(np.mean(bx_nrbtd[n][arc]))
-        #     sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_4brs.append(t_critical * sigma)
-
-
-
-        #     four_bars.append(np.mean(bx_msktd[n][arc]))
-        #     sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_4brs.append(t_critical * sigma)
-        # else:
-        #     eight_bars.append(np.mean(bx_nrtd[n][arc]))
-        #     sample_stdev = np.std(bx_nrtd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_8brs.append(t_critical * sigma)
-
-        #     eight_bars.append(np.mean(bx_btd[n][arc]))
-        #     sample_stdev = np.std(bx_btd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_8brs.append(t_critical * sigma)
-
-        #     eight_bars.append(np.mean(bx_nrbtd[n][arc]))
-        #     sample_stdev = np.std(bx_nrbtd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_8brs.append(t_critical * sigma)
-
-        #     eight_bars.append(np.mean(bx_msktd[n][arc]))
-        #     sample_stdev = np.std(bx_msktd[n][arc])    # Get the sample standard deviation
-        #     sigma = sample_stdev/np.sqrt(sample_size)  # Standard deviation estimate
-        #     yer_8brs.append(t_critical * sigma)
-
-# r2 = np.arange(len(two_bars))
-# r4 = [x + barWidth for x in r2]
-# r8 = [x + 2*barWidth for x in r2]
-
-barWidth = 0.2
-rnr = np.arange(len(nr_bars))
-rnrbs = [x + barWidth for x in rnr]
-rbs = [x + 2*barWidth for x in rnr]
-rmsk = [x + 3*barWidth for x in rnr]
-
-# plt.subplot(2, 2, 3)
-# plt.gca().set_title('25000 Nodes')
-
-# ax = plt.subplot(2, 1, 2)
-pdb.set_trace()
-plt.gca().set_title('25000 Nodes')
-
-plt.bar(rnr, nr_bars, width = barWidth, hatch='///', edgecolor = 'black', color='w', yerr=yer_nr, capsize=7, label='NR')
-plt.bar(rnrbs, nrbs_bars, width = barWidth, hatch='\\\\\\', edgecolor = 'black', color='w',yerr=yer_nrbs, capsize=7, label='NR-BSC')
-plt.bar(rbs, bs_bars, width = barWidth, hatch='xxx', edgecolor = 'black',color='w', yerr=yer_bs, capsize=7, label='BSC')
-plt.bar(rmsk, msk_bars, width = barWidth, hatch='...', edgecolor = 'black', color='w',yerr=yer_msk, capsize=7, label='MOSEK')
-
-plt.ylabel('Time(s)')
-plt.xticks([(r + 2*barWidth) for r in range(len(nr_bars))], ['2', '4', '8'])
-plt.xlabel('Average Degree of Nodes')
-plt.tight_layout()
-plt.legend()
-plt.savefig('plots/' + str(n) + 'densityfig25kn')
-
-# plt.bar(r2, two_bars, width = barWidth, color = 'cyan', edgecolor = 'black', yerr=yer_2brs, capsize=3)
-# plt.bar(r4, four_bars, width = barWidth, color = 'orange', edgecolor = 'black', yerr=yer_4brs, capsize=3)
-# plt.bar(r8, eight_bars, width = barWidth, color = 'purple', edgecolor = 'black', yerr=yer_8brs, capsize=3)
-# plt.ylabel('Time(s)')
-# plt.xticks([r for r in range(len(r4))], ['NR', 'BSC', 'NR-BSC', 'MSK'])
-# plt.xlabel('Algorithm')
-# plt.tight_layout()
-# plt.legend()
-# plt.savefig('plots/' + str(n) + 'densityfig')
-
-# plt.show()
-
-
-# print(tabulate([['NR', (100*eight_bars[0]/two_bars[0]) - 100], ['BS', (100*eight_bars[1]/two_bars[1]) - 100], ['NRBS', (100*eight_bars[2]/two_bars[2]) - 100],['MSK', (100*eight_bars[3]/two_bars[3]) - 100]], headers=['%inc']))
-# print(tabulate([['NR', (100*four_bars[0]/two_bars[0]) - 100], ['BS', (100*four_bars[1]/two_bars[1]) - 100], ['NRBS', (100*four_bars[2]/two_bars[2]) - 100],['MSK', (100*four_bars[3]/two_bars[3]) - 100]], headers=['%inc']))
-
-
-
-# pdb.set_trace()
-
-
-
-
-
-    # try:
-    #     cvx.append(np.mean(setup_times_cvx_l))
-    #     bs.append(np.mean(solve_times_bs_l))
-    #     nr.append(np.mean(solve_times_nr_l))
-    #     alg3.append(np.mean(solve_times_alg3_l))
-    # except:
-    #     pdb.set_trace()
-
-
-# fig = ax.get_figure()
-
-df = pd.DataFrame({'MOSEK': cvx, 'BS': bs, 'NR': nr, 'NR-BS': alg3}, index=lams)
-
-ax = df.plot.bar(rot=0)
-ax.set_ylabel('Time')
-ax.set_xlabel('Lambda')
-ax.set_title('Lambda Effect')
-fig = ax.get_figure()
-fig.show()
-fig.savefig("varying_lambda node_no: " + str(n))
-pdb.set_trace()
-
-    # plt.figure()
-    # #pdb.set_trace()
-    # plt.plot(gap_bs_l[0], label='BSC', marker='o')
-    # plt.plot(gap_nr_l[0], label='NR', marker='o')
-    # plt.plot(gap_alg3_l[0], label='NR-BSC', marker='o')
-    #
-    # # plt.yscale('log')
-    # plt.title('Number of nodes: ' + str(n))
-    # plt.legend(loc='upper right')
-    # plt.xlabel('Iteration number')
-    # plt.ylabel('Objective Gap')
-    # plt.savefig('plots/' + str(n))
-
-### Experiment Analysis ###
-### Experiment 3 ###
-experiment_name = 'network_density'
-lam = 0.1
-mu = 10
-variances = 10
-num_arcs = [n*2, n*4, n*8]
-seeds=8 * np.arange(10)
-
-for arcs in num_arcs:
-    for seed in seeds:
-        pass
-
-### Experiment Analysis ###
-### Experiment 4 ###
-experiment_name = 'performance'
-lam = 0.1
-mu = 10
-var = 10
-arcs = n*2
-seeds=99 * np.arange(100)
-data = []
-
-for seed in seeds:
-
-    lamstr=str(lam)
-    lamstr = lamstr.replace(".","-")
-
-    save_extension = lamstr + '_' + str(mu) + str(var) + '_' + str(arcs) + '_' + str(seed)
-
-    times_alg3 = np.array(load('times_alg3' + save_extension, n, experiment_name))
-    times_nr = np.array(load('times_nr' + save_extension, n, experiment_name))
-    times_bs = np.array(load('times_bs' + save_extension, n, experiment_name))
-    solve_time_cvx = np.array(load('solve_time_cvx' + save_extension, n, experiment_name))
-
-    best_alg = str(np.array(load('best_soln_algo' + save_extension, n, experiment_name)))
-    best_obj = float(np.array(load('benchmark_soln' + save_extension, n, experiment_name)))
-
-    logfilename = 'saved_runs/' + str(n) + '/' + lamstr + '_' + str(mu) + str(var) +  '_' + str(arcs) + '_' + str(seed)
-    log = read_log(logfilename)
-
-    bs_objs = np.array(load('bs_objs' + save_extension, n, experiment_name))
-    nr_objs = np.array(load('nr_objs' + save_extension, n, experiment_name))
-    alg3_objs = np.array(load('alg3_objs' + save_extension, n, experiment_name))
-
-    bs_i = find_eq_obj_ind(bs_objs, best_obj)
-    nr_i = find_eq_obj_ind(nr_objs, best_obj)
-    alg3_i = find_eq_obj_ind(alg3_objs, best_obj)
-
-    print(times_bs[bs_i], times_alg3[alg3_i], times_nr[nr_i], float(solve_time_cvx))
-    data.append([times_bs[bs_i], times_alg3[alg3_i], times_nr[nr_i], float(solve_time_cvx)])
-
-df = pd.DataFrame(data,columns=['BSC','NR-BSC','NR','CVX'])
-ax = df.plot(kind='box', figsize=[16, 8])
-fig = ax.get_figure()
-fig.show()
-pdb.set_trace()
-
-
-cvx_dict= {}
-cvx = []
-bs = []
-nr = []
-alg3 = []
-
-for n in [5000]:
-
-    lams = [0.1, 0.5, 5, 10, 100]
-    mus = [1, 10, 100]
-    variances = [1, 10, 50, 100]
-    num_arcs = [n*2, n*4, n*8]
-    for mu in mus:
-        for var in variances:
-            for seed in seeds:
-                for lam in lams:
-                    print('mu - var - lam - seed', mu, var, lam, seed, '============')
-                    # lam = lams[0]
-                    # mu = mus[0]
-                    # var = variances[0]
-                    arcno = num_arcs[0]
-                    # seed = seeds[0]
-                    # i = iss[0]
-                    save_extension = str(lam) + '_' + str(mu) + str(var) + '_' + str(arcno) + '_' + str(seed)
-
-                    times_alg3 = np.array(load('times_alg3' + save_extension, n))
-                    times_nr = np.array(load('times_nr' + save_extension, n))
-                    times_bs = np.array(load('times_bs' + save_extension, n))
-                    solve_time_cvx = np.array(load('solve_time_cvx' + save_extension, n))
-
-                    print('=======')
-                    print(arcno)
-                    print(times_bs[-1], times_alg3[-1], times_nr[-1], solve_time_cvx)
-
-
-
-    times_cvx_l = []
-    gap_cvx_l= []
-    gap_bs_l= []
-    times_bs_l= []
-    bs_iters_l= []
-    gap_nr_l= []
-    times_nr_l= []
-    nr_iters_l= []
-    gap_alg3_l= []
-    times_alg3_l= []
-    alg3_iters_l= []
-    solve_times_cvx_l = []
-    setup_times_cvx_l = []
-    solve_times_nr_l = []
-    solve_times_bs_l = []
-    solve_times_alg3_l = []
-    
-    
-    myrange =10
-    if n==75000:
-        myrange = 5
-    for i in range(myrange):
-        solve_times_cvx_l.append(load('solve_time_cvx' + str(i), n))
-        # setup_times_cvx_l.append(load('setup_time_cvx' + str(i), n))
-    
-        gap_bs = np.array(load('gap_bs' + str(i), n))
-        gap_bs[gap_bs<0.01]=0
-        gap_bs_l.append(gap_bs)
-        times_bs_l.append(load('times_bs' + str(i), n))
-        solve_times_bs_l.append(load('times_bs' + str(i), n)[-1])
-        # bs_subproblem_times=load(bs_subproblem_times, 'bs_subproblem_times' + str(i), n)
-        bs_iters = np.array(load('bs_iters' + str(i), n)) + 1
-        bs_iters_l.append(bs_iters)
-    
-        gap_nr = np.array(load('gap_nr' + str(i), n))
-        gap_nr[gap_nr<0.01]=0
-        gap_nr_l.append(gap_nr)
-        times_nr_l.append(load('times_nr' + str(i), n))
-        solve_times_nr_l.append(load('times_nr' + str(i), n)[-1])
-        nr_iters_l.append(load('nr_iters' + str(i), n))
-        # nr_subproblem_times=load(nr_subproblem_times, 'nr_subproblem_times' + str(i), n)
-    
-        gap_alg3 = np.array(load('gap_alg3' + str(i), n))
-        gap_alg3[gap_alg3<0.01]=0
-        gap_alg3_l.append(gap_alg3)
-        times_alg3_l.append(load('times_alg3' + str(i), n))
-        solve_times_alg3_l.append(load('times_alg3' + str(i), n)[-1])
-        alg3_iters_l.append(load('alg3_iters' + str(i), n))
-        # alg3_subproblem_times=load(alg3_subproblem_times, 'alg3_subproblem_times' + str(i), n)
-    
-    
-    cvx.append(np.mean(solve_times_cvx_l))
-    bs.append(np.mean(solve_times_bs_l))
-    nr.append(np.mean(solve_times_nr_l))
-    alg3.append(np.mean(solve_times_alg3_l))
-    
-    print('cvx ' + str(n) + ' ' + str(np.mean(solve_times_cvx_l)) + '' )
-    print('bs ' + str(n) + ' ' + str(np.mean(solve_times_bs_l))+ ' ' + str(np.mean(bs_iters_l)))
-    print('nr ' + str(n) + ' ' + str(np.mean(solve_times_nr_l)) + ' ' + str(np.mean(nr_iters_l)))
-    print('alg3 ' + str(n) +  ' ' + str(np.mean(solve_times_alg3_l))+ ' ' +str(np.mean(alg3_iters_l)))
-    
-    print('======================/=============================')
-    
-
-    pdb.set_trace()
-
-    bs_dict[n] = {}
-    bs_dict[n]['mean solve time'] = np.mean(solve_times_bs_l)
-
-    nr_dict[n] = {}
-    nr_dict[n]['mean solve time'] = np.mean(solve_times_nr_l)
-
-    alg3[n] = {}
-    alg3[n]['mean solve time'] = np.mean(solve_times_alg3_l)
-
-
-    cvx_dict[n]['mean setup time'] = np.mean(setup_times_cvx_l)
-
-
-
-    print(n)
-    # gap_cvx, times_cvx = get_level_time(gap_cvx_l, times_cvx_l)
-    gap_bs, times_bs = get_level_time(gap_bs_l, times_bs_l)
-    gap_nr, times_nr = get_level_time(gap_nr_l, times_nr_l)
-    gap_alg3, times_alg3 = get_level_time(gap_alg3_l, times_alg3_l)
-
-
-    df = pd.DataFrame({'BS': times_bs[::-1], 'NR': times_nr[::-1], 'NR-BS': times_alg3[::-1]}, index=gap_nr[::-1])
-    ax = df.plot.bar(rot=0)
-
-    ax.set_ylabel('Time')
-    ax.set_xlabel('Gap')
-    ax.set_title('Time ')
-    fig = ax.get_figure()
-    fig.savefig("network_" + str(n) )
-pdb.set_trace()
-
-
-plt.figure()
-#pdb.set_trace()
-plt.plot(gap_bs_l[0], label='BSC', marker='o')
-plt.plot(gap_nr_l[0], label='NR', marker='o')
-plt.plot(gap_alg3_l[0], label='NR-BSC', marker='o')
-
-# plt.yscale('log')
-plt.title('Number of nodes: ' + str(n))
-plt.legend(loc='upper right')
-plt.xlabel('Iteration number')
-plt.ylabel('Objective Gap')
-plt.savefig('plots/' + str(n))
-
-plt.figure()
-#pdb.set_trace()
-plt.plot(gap_bs_l[2], label='BSC', marker='o')
-plt.plot(gap_nr_l[2], label='NR', marker='o')
-plt.plot(gap_alg3_l[2], label='NR-BSC', marker='o')
-
-# plt.yscale('log')
-plt.title('Number of nodes: ' + str(n))
-plt.legend(loc='upper right')
-plt.xlabel('Iteration number')
-plt.ylabel('Objective Gap')
-plt.savefig('plots/' + str(n) + '_different_run')
-
-plt.figure()
-#pdb.set_trace()
-plt.plot(times_bs_l[2],gap_bs_l[2], label='BSC', marker='o', linestyle='dashed')
-plt.plot(times_nr_l[2],gap_nr_l[2], label='NR', marker='D', linestyle='dashed')
-#plt.plot(times_alg3_l[2], gap_alg3_l[2],label='NR-BSC', marker='o')
-
-# plt.yscale('log')
-plt.title('Number of nodes: ' + str(n))
-plt.legend(loc='upper right')
-plt.xlabel('Time (s)')
-plt.ylabel('Objective Gap')
-plt.savefig('plots/' + str(n) + 'timevsiter')
-pdb.set_trace()
-##do stacked bar plot for cvx over number of nodes
-#pdb.set_trace()
-#pdb.set_trace()
-
-nodesnumbers = [5000,10000,25000,50000,75000]
-
-
-df = pd.DataFrame({'Mosek': cvx,'BSC': bs, 'NR': nr, 'NR-BSC': alg3 }, index=nodesnumbers)
-ax = df.plot.bar(rot=0)
-
-ax.set_ylabel('Time (seconds)')
-ax.set_xlabel('# Nodes')
-ax.set_title('')
-#for i in ax.patches:
-#    # get_width pulls left or right; get_y pushes up or down
-#    ax.text(i.get_x()+.04,i.get_height()+12000,"BSC","MOSEK","NR","NR-BSC", fontsize=11, color='dimgrey')
-fig = ax.get_figure()
-fig.savefig("comparison")
-
-
-
-
-
-    # TODO:
-    # maybe no presolve or cut in early iters for cvx
-
-    # pdb.set_trace()
-    # pdb.set_trace()
-
-
-lams = np.linspace(0, 5, num=50)
-n = 5000
-arcs = 40000
-mu=20
-var=60
-d_top = 1
-mucosts=[]
-varcosts=[]
-seed = 0
-lam_costs = {}
-iters = 0 
-vallams = []
-for lam in lams:
-    if (iters%1==0 and iters<=10) or (iters%5==0 and iters>10) or lam==lams[-1] :
-        lamstr = str(round(lam, 6))
-        lamstr = lamstr.replace('.','')
-
-        save_extension = str(mu) + str(var) + '_' + str(arcs) + '_' + str(seed) + str(d_top)
-
-        experiment_name = 'varying_lams'
-        mucost = load( 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-        varcost = load( 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-        mucosts.append(mucost)
-        varcosts.append(varcost)
-        vallams.append(lam)
-        lam_costs[lam] = (mucost, varcost)
-    iters += 1
-
-x=[]
-y=[]
-iters = 0
-
-for lam in lams:
-    if (iters%1==0 and iters<=10) or (iters%5==0 and iters>10) or lam==lams[-1] :
-        y.append(lam_costs[lam])
-        x.append(lam)
-    iters +=1
-
-fig, ax1 = plt.subplots()
-
-# for xe, ye in zip(x, y):
-#     plt.scatter([xe] * len(ye), ye)
-ax2 = ax1.twinx()
-pdb.set_trace()
-ax1.scatter(vallams, mucosts)
-ax2.scatter(vallams, varcosts)
-
-# plt.xticks(list(np.arange(lams)))
-def major_formatter(x, pos):
-    return "[%.2f]" % x
-import matplotlib
-ax1.set_xticks([lams[0], lams[5], lams[10], lams[15], lams[20], lams[25], lams[30], lams[35], lams[40], lams[45], lams[-1]])
-ax1.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.1f'))
-# ax1.xaxis.set_ticks
-
-lns1 = ax1.plot(vallams, mucosts, label='Mean')
-lns2 = ax2.plot(vallams, varcosts, '--', label='Standard Deviation')
-
-
-# added these three lines
-lns = lns1+lns2
-labs = [l.get_label() for l in lns]
-ax1.legend(lns, labs, loc=1)
-
-
-ax1.set_xlabel('Value of Reliability')
-ax1.set_ylabel('Mean Cost')
-ax2.set_ylabel('Standard Deviation Cost')
-
-
-# plt.plot(lams, mucosts, label='Mean')
-# plt.plot(lams, varcosts, '-', label='Standard Deviation')
-# plt.legend(loc='upper right')
-# plt.xlabel('Value of Reliability')
-# plt.ylabel('Mean Cost')
-# plt.ylabel('Mean Cost')
-
-# ax2.set_ylabel('Y2 data', color='b')
-plt.savefig('plots/' + 'meanvsstd')
-# plt.show()
+                perc_rel_tol = 1e-3
+
+                figure_grid = 120
+                plt.subplot(figure_grid + i)
+
+            cplex_times = np.zeros((len(exponents), len(temp_tails)))
+            nr_times = np.zeros((len(exponents), len(temp_tails)))
+            bsc_times = np.zeros((len(exponents), len(temp_tails)))
+
+            nr_iters_ = np.zeros(len(exponents))
+            bs_iters_ = np.zeros(len(exponents))
+            cplex_infeas_ = np.zeros(len(exponents))
+
+            for exponent in exponents:
+
+                bs_iter_list = []
+                nr_iter_list = []
+                cplex_infeas_list = []
+                j = 0
+
+                for tail in tails:
+                    row = np.where(exponents == exponent)[0][0]
+                    col = j
+
+                    cut_idx = None
+                    weird = False
+
+                    if exponent != '15':
+                        network = base + atype + exponent + tail
+                        filename = experiment + '/' + base + '/' + network
+                        data_dic = load_run(filename)
+                        cplex_times[row, col] = data_dic['solver_elapsed']
+                        cplex_obj = data_dic['solver_obj']
+
+                        cplex_iter_objs = data_dic['solver_primals']
+                        cplex_duals = data_dic['solver_duals']
+
+                        cplex_gaps = 100*abs(np.array(cplex_iter_objs[:-1]) - np.array(cplex_duals))/np.minimum(np.array(cplex_iter_objs[:-1]),np.array(cplex_duals))
+
+                        cplex_iter_times = data_dic['solver_iter_times']
+                        cplex_feasible = data_dic['solver_feasible']
+
+                        cplex_iter_objs[-1] = cplex_obj
+
+                        nr_iter_objs = data_dic['nr_iter_objs']
+                        nr_iter_elapsed = data_dic['nr_iter_elapsed']
+
+                        bs_iter_objs = data_dic['bs_iter_objs']
+                        bs_iter_elapsed = data_dic['bs_iter_elapsed']
+
+                        lb_elapsed = data_dic['elapsed_lower_bound']
+                        ub_elapsed = data_dic['elapsed_upper_bound']
+                    else:
+                        network = base + atype + exponent + tail
+                        filename = experiment + '/' + base + '/' + network + '_cp_results'
+                        cp_dic = load_run(filename)
+
+                        filename = experiment + '/' + base + '/' + network + '_nr_results'
+                        nr_dic = load_run(filename)
+
+                        filename = experiment + '/' + base + '/' + network + '_bs_results'
+                        bs_dic = load_run(filename)
+
+                        cplex_times[row, col] = cp_dic['solver_elapsed']
+                        cplex_obj = cp_dic['solver_obj']
+
+                        cplex_iter_objs = cp_dic['solver_primals']
+                        cplex_duals = cp_dic['solver_duals']
+
+                        cplex_gaps = 100*abs(np.array(cplex_iter_objs[:-1]) - np.array(cplex_duals))/np.minimum(np.array(cplex_iter_objs[:-1]),np.array(cplex_duals))
+
+                        cplex_iter_times = cp_dic['solver_iter_times']
+                        cplex_feasible = cp_dic['solver_feasible']
+
+                        cplex_iter_objs[-1] = cplex_obj
+
+                        nr_iter_objs = nr_dic['nr_iter_objs']
+                        nr_iter_elapsed = nr_dic['nr_iter_elapsed']
+
+                        bs_iter_objs = bs_dic['bs_iter_objs']
+                        bs_iter_elapsed = bs_dic['bs_iter_elapsed']
+
+                        lb_elapsed = bs_dic['elapsed_lower_bound']
+                        ub_elapsed = bs_dic['elapsed_upper_bound']
+
+                    nr_iter_elapsed = lb_elapsed + np.array(nr_iter_elapsed)
+                    bs_iter_elapsed = lb_elapsed + \
+                        ub_elapsed + np.array(bs_iter_elapsed)
+
+
+                    for _ind in range(len(cplex_iter_objs) - 1, 0, -1):
+                        if not am_i_close(cplex_iter_objs[_ind], cplex_iter_objs[_ind - 1], perc_rel_tol=1e-7):
+                            cplex_iter_objs = cplex_iter_objs[:_ind + 1]
+                            cplex_iter_times = cplex_iter_times[:_ind + 1]
+                            break
+
+
+                    def get_indices(algo, iter_objs, common, common_2):
+
+                        ind = None
+                        trial = False
+                        if trial:
+
+                            if algo == 'cplex' and (iter_objs[0] < iter_objs[1]):
+                                for p in range(len(iter_objs) - 1, 0, -1):
+                                    if iter_objs[p] < common:
+                                        ind = p
+                                        break
+
+                                    elif iter_objs[p] == common:
+                                        ind = p
+                                        break
+                            else:
+                                for p in range(len(iter_objs) - 1, 0, -1):
+                                    if iter_objs[p] > common:
+                                        ind = p + 1
+                                        break
+
+                                    elif iter_objs[p] == common:
+                                        ind = p
+                                        break
+
+                        else:
+
+                            if algo != 'cplex':
+                                for p in range(len(iter_objs)):
+                                    if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
+                                        ind = p
+                                        break
+
+                            else:
+
+                                if iter_objs[0] > iter_objs[1]:
+                                    for p in range(len(iter_objs)):
+                                        if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
+                                            ind = p
+                                            break
+
+                                else:
+                                    for p in range(len(iter_objs) - 1, 0, -1):
+                                        if not am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
+                                            ind = p
+                                            break
+                                    if p + 1 != len(iter_objs):
+                                        p += 1
+
+                        if ind is None:
+                            ind = len(iter_objs) - 1
+                        if ind == len(iter_objs):
+                            ind = len(iter_objs) - 1
+
+                        return ind
+
+                    def find_indices(iter_objs, algo, common, common_2=None):
+                        ind = get_indices(algo, iter_objs, common, common_2)
+
+                        return ind
+
+
+                    if cplex_iter_objs[0] > cplex_iter_objs[1]:
+                        common = min(min(nr_iter_objs), min(bs_iter_objs))
+                    else:
+                        common = min(min(nr_iter_objs), min(bs_iter_objs), min(cplex_iter_objs))
+
+
+                    nr_i = find_indices(nr_iter_objs, 'nr', common)
+                    bs_i = find_indices(bs_iter_objs, 'bs', common)
+                    cp_i = find_indices(cplex_iter_objs, 'cplex', common)
+
+                    if nr_i is None:
+                        nr_i = len(nr_iter_elapsed) - 1
+
+                    if bs_i is None:
+                        bs_i = len(bs_iter_elapsed) - 1
+
+                    # print('*********')
+                    # print('common: ', common)
+                    # print('network: ', network)
+                    # print('cplex iters: ', cplex_iter_objs)
+                    # print('nr_iter_objs: ', nr_iter_objs)
+                    # print('bs_iter_objs: ', bs_iter_objs)
+                    # print('---------')
+                    
+                    print('nr_obj: ', nr_iter_objs[nr_i])
+                    print('bs_obj: ', bs_iter_objs[bs_i])
+                    print('cp_obj: ', cplex_iter_objs[cp_i])
+                    # try:
+
+                    #     print('cplex end obj: ', cplex_iter_objs[cp_i])
+                    # except:
+                    #     pdb.set_trace()
+                    # print('cplex_gap: ', cplex_gaps[cp_i])
+                    
+                    # print('nr_tm: ', nr_iter_elapsed[nr_i])
+                    # print('bs_tm: ', bs_iter_elapsed[bs_i])
+                    # print('cplex end tm: ', cplex_iter_times[cp_i])
+                    # print('&&&&&&&&&&&&')
+
+                    cplex_times[row, col] = cplex_iter_times[cp_i]
+
+                    nr_elapsed = nr_iter_elapsed[nr_i]
+                    bs_elapsed = bs_iter_elapsed[bs_i]
+
+                    bs_iter_list.append(bs_i)
+                    nr_iter_list.append(nr_i)
+                    cplex_infeas_list.append(data_dic['solver_infeas'])
+
+                    nr_times[row, col] = nr_elapsed
+                    bsc_times[row, col] = bs_elapsed
+
+                    j += 1
+
+                nr_iters_[row] = np.mean(nr_iter_list)
+                bs_iters_[row] = np.mean(bs_iter_list)
+                cplex_infeas_[row] = np.mean(cplex_infeas_list)
+
+            family_type = atype.strip('_')
+            if atype == '_8_':
+                num_arcs = '8n'
+
+            elif atype == '_lo_8_':
+                num_arcs = '8n'
+
+            elif atype == '_sr_':
+                num_arcs = 'n' + r'$\sqrt{n}$'
+
+            else:
+                num_arcs = 'n' + r'$\sqrt{n}$'
+
+            family_name = base.upper() + '-' + family_type.upper() + '  (m=' + num_arcs + ')'
+            graph_family(family_name, cplex_times, nr_times,
+                         bsc_times, nr_iters_, bs_iters_, cplex_infeas_)
+        plt.tight_layout(pad=1.5)
+        save_fig('comparison_' + base.lower())
+        plt.clf()
+
+
+def graph_lambar_experiments():
+
+
+    experiment = 'varying_lambar'
+    bases = ['netgen']
+    tails = ['a','b','c','d','e','f','g','h','j','k']
+
+    exponents = np.array(['12'])
+    types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
+
+    lams = np.array([0.01, 10, 1000])
+
+
+    # plt.figure(figsize=(16, 8))
+    for base in bases:
+        i = 0
+        for atype in types:
+            plt.figure(figsize=(16, 8))
+
+            if base == 'goto' and atype.find('lo') >= 0:
+                continue
+
+            i += 1
+            if base == 'netgen':
+                elapsed = np.zeros((3, len(lams)))
+
+                perc_rel_tol = 1e-2
+
+                # figure_grid = 220
+                # plt.subplot(figure_grid + i)
+            else:
+
+                perc_rel_tol = 1e-2
+
+                figure_grid = 120
+                plt.subplot(figure_grid + i)
+
+            for lam in [0.01, 10, 1000]:
+
+                lam_dir = str(lam).replace('.', '_')
+                if lam_dir == '1_0':
+                    lam_dir = '1'
+                print(lam_dir)
+
+                cplex_times = np.zeros((len(exponents), len(tails)))
+                nr_times = np.zeros((len(exponents), len(tails)))
+                bsc_times = np.zeros((len(exponents), len(tails)))
+
+                j = 0
+                for exponent in exponents:
+                    for tail in tails:
+
+                        filename = experiment + '/' + base + '/' + \
+                            base + atype + exponent + tail + '_' + lam_dir
+                        data_dic = load_run(filename)
+
+                        lam_col = np.where(lams == lam)[0][0]
+
+                        row = np.where(exponents == exponent)[0][0]
+                        col = j
+
+                        cplex_times[row, col] = data_dic['solver_elapsed']
+                        cplex_obj = data_dic['solver_obj']
+
+                        cplex_iter_objs = data_dic['solver_primals']
+                        cplex_iter_times = data_dic['solver_iter_times']
+                        cplex_feasible = data_dic['solver_feasible']
+
+                        cplex_iter_objs[-1] = cplex_obj
+
+                        nr_iter_objs = data_dic['nr_iter_objs']
+                        nr_iter_elapsed = data_dic['nr_iter_elapsed']
+
+                        bs_iter_objs = data_dic['bs_iter_objs']
+                        bs_iter_elapsed = data_dic['bs_iter_elapsed']
+
+                        lb_elapsed = data_dic['elapsed_lower_bound']
+                        ub_elapsed = data_dic['elapsed_upper_bound']
+
+                        nr_iter_elapsed = lb_elapsed + np.array(nr_iter_elapsed)
+                        bs_iter_elapsed = lb_elapsed + \
+                            ub_elapsed + np.array(bs_iter_elapsed)
+
+
+
+                        def get_indices(algo, iter_objs, common, common_2):
+
+                            ind = None
+                            trial = False
+                            if trial:
+
+                                if algo == 'cplex' and (iter_objs[0] < iter_objs[1]):
+                                    for p in range(len(iter_objs) - 1, 0, -1):
+                                        if iter_objs[p] < common:
+                                            ind = p
+                                            break
+
+                                        elif iter_objs[p] == common:
+                                            ind = p
+                                            break
+                                else:
+                                    for p in range(len(iter_objs) - 1, 0, -1):
+                                        if iter_objs[p] > common:
+                                            ind = p + 1
+                                            break
+
+                                        elif iter_objs[p] == common:
+                                            ind = p
+                                            break
+
+                            else:
+
+                                if algo != 'cplex':
+                                    for p in range(len(iter_objs)):
+                                        if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
+                                            ind = p
+                                            break
+
+                                else:
+
+                                    if iter_objs[0] > iter_objs[1]:
+                                        for p in range(len(iter_objs)):
+                                            if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
+                                                ind = p
+                                                break
+
+                                    else:
+                                        for p in range(len(iter_objs) - 1, 0, -1):
+                                            if not am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
+                                                ind = p
+                                                break
+                                        if p + 1 != len(iter_objs):
+                                            p += 1
+
+                            if ind is None:
+                                ind = len(iter_objs) - 1
+                            if ind == len(iter_objs):
+                                ind = len(iter_objs) - 1
+
+                            return ind
+
+                        def find_indices(iter_objs, algo, common, common_2):
+                            ind = get_indices(algo, iter_objs, common, common_2)
+
+                            return ind
+
+                        if data_dic['solver_infeas'] < 1e-6:
+
+                            order = [min(nr_iter_objs), min(bs_iter_objs), cplex_obj]
+                            order = np.array(order)
+
+                            common = max(order)
+                            common_ind = np.argmax(order)
+
+                            order = np.delete(order, common_ind)
+                            common_2 = max(order)
+
+                            nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
+                            bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
+                            cp_i = find_indices(
+                                cplex_iter_objs, 'cplex', common, common_2)
+
+                        else:
+                            common = max(min(nr_iter_objs), min(bs_iter_objs))
+
+                            nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
+                            bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
+                            cp_i = find_indices(
+                                cplex_iter_objs, 'cplex', common, common_2)
+
+
+                        cplex_times[row, col] = cplex_iter_times[cp_i]
+
+                        nr_elapsed = nr_iter_elapsed[nr_i]
+                        bs_elapsed = bs_iter_elapsed[bs_i]
+
+                        nr_times[row, col] = nr_elapsed
+                        try:
+                            bsc_times[row, col] = bs_elapsed
+                        except:
+                            pdb.set_trace()
+                        j += 1
+
+                elapsed[0, lam_col] = nr_times.mean(axis=1)
+                elapsed[1, lam_col] = bsc_times.mean(axis=1)
+                elapsed[2, lam_col] = cplex_times.mean(axis=1)
+
+            barWidth = 0.2
+            r_nr = np.arange(3)
+            r_bsc = [x + barWidth for x in r_nr]
+            r_cplex = [x + 2 * barWidth for x in r_nr]
+
+            # plt.rcParams["font.size"] = 14
+
+            plt.bar(r_cplex, elapsed[2, :], width=barWidth, hatch='xxx', edgecolor='#087efe', color='#087efe',
+                    ecolor='#c6ccce', alpha=0.8,  capsize=5, label='CPLEX')
+
+            plt.bar(r_bsc, elapsed[1, :], width=barWidth, hatch='\\\\\\', edgecolor='#FF4500', color='#FF4500',
+                    ecolor='#c6ccce', alpha=0.8, capsize=5, label='BSC')
+
+            plt.bar(r_nr, elapsed[0, :], width=barWidth, hatch='///', edgecolor='#b7fe00',
+                    color='#b7fe00', ecolor='#c6ccce', alpha=0.8, capsize=5, label='NR')
+            
+            
+            # tap_means_scaled[i]/2
+            for pind in r_nr:
+                
+                
+                plt.annotate('{0:1.1f}'.format(elapsed[2, pind]), (pind + 2 * barWidth, 0), textcoords='offset points', xytext=(
+                    0, 20), ha='center', va='bottom', rotation=70,  size=20)
+                plt.annotate('{0:1.1f}'.format(elapsed[1, pind]), (pind + barWidth, 0), textcoords='offset points', xytext=(
+                    0, 20), ha='center', va='bottom', rotation=70,  size=20)
+                plt.annotate('{0:1.1f}'.format(elapsed[0, pind]), (pind, 0), textcoords='offset points', xytext=(
+                    0, 20), ha='center', va='bottom', rotation=70, size=20)
+
+            plt.ylabel('Running time', fontsize=24)
+
+            plt.xticks([(r + barWidth) for r in range(3)],
+                       [r'$\bar\lambda$' + '=0.01', r'$\bar\lambda$' + '=10', r'$\bar\lambda$' + '=1000'], fontsize=20)
+            plt.yticks(fontsize=20)
+            family_type = atype.strip('_')
+            if atype == '_8_':
+                num_arcs = '8n'
+
+            elif atype == '_lo_8_':
+                num_arcs = '8n'
+
+            elif atype == '_sr_':
+                num_arcs = 'n' + r'$\sqrt{n}$'
+
+            else:
+                num_arcs = 'n' + r'$\sqrt{n}$'
+
+            family_name = base.upper() + '-' + family_type.upper() + '  (m=' + num_arcs + ')'
+
+            plt.title(family_name, fontsize=24)
+            plt.tight_layout()
+            # plt.figtext(0.5, 0.01, txt, wrap=True,
+            #             ha='center', va="bottom", fontsize=7)
+            plt.legend(fontsize=24)
+            save_fig('varying_lambar_' + family_type.lower().replace('_',''), tight_layout=True)
+            plt.clf()
+
+
+
+#run analysis to get graphs
+graph_gap_levels()
+graph_lambar_experiments()
+graph_base_vs_reliable()
+graph_comparison()
+
 
 
