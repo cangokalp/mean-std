@@ -40,8 +40,8 @@ def mean_std(array):
     return mean, std
 
 def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_iters_, cplex_infeas_):
-    node_num = [4096, 8192, 8192 * 2]
-    node_num = [r'$2^{12}$', r'$2^{13}$', r'$2^{14}$']
+    node_num = [4096, 8192, 8192*2, 8192*4]
+    node_num = [r'$2^{12}$', r'$2^{13}$', r'$2^{14}$', r'$2^{15}$']
     print(family_name)
 
     print('cplex')
@@ -78,10 +78,14 @@ def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_it
 
     if family_name.lower().find('sr') >= 0:
         plt.ylim(top=1e4)
+        plt.ylim(bottom=1e0)
+
         # plt.xlim(xmin=4000)
 
     else:
         plt.ylim(top=1e4)
+        plt.ylim(bottom=1e0)
+        
         # plt.xlim(xmin=4000)
     # plt.axis([xs,xe,ys,ye])
 
@@ -156,8 +160,8 @@ def graph_base_vs_reliable():
         rel_gap.append(100*abs(base_obj[i] - rel_obj[i])/min(base_obj[i], rel_obj[i]))
 
     plt.plot(lams, rel_gap , 'k--+', linewidth=1, label='gap', markersize=4)
-    plt.ylabel('Relative Objective Gap', fontsize=12)
-    plt.xlabel(r'$\bar{\lambda}$', fontsize=12)
+    plt.ylabel('Relative Objective Gap', fontsize=10)
+    plt.xlabel(r'$\bar{\lambda}$', fontsize=10)
     ax = plt.gca()
     ax.yaxis.set_major_formatter(mtick.PercentFormatter(decimals=0))
     # plt.yscale('log')
@@ -278,7 +282,7 @@ def graph_gap_levels():
 
                     plt.ylabel('Relative Objective Gap % (logscale)', fontsize=12)
                     plt.yscale('log')
-                    plt.ylim(bottom=1e-7)
+                    plt.ylim(bottom=1e-5)
                     # plt.xlim(left=0)
 
                     plt.xlabel('Running time', fontsize=12)
@@ -293,10 +297,10 @@ def graph_comparison():
     experiment = 'graph_families'
 
     bases = ['netgen']  # , 'goto']
-    tails = ['a', 'b', 'c', 'd', 'e']
-    exponents = (np.arange(12, 15)).astype(str)
+    tails = ['a','b','c','d','e']
+    exponents = (np.arange(12, 16)).astype(str)
     types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
-
+    temp_tails = ['a','b','c','d','e']
 
     for base in bases:
         plt.figure(figsize=(16, 8))
@@ -308,25 +312,26 @@ def graph_comparison():
                 continue
             i += 1
             if base == 'netgen':
-                perc_rel_tol = 1e-2
+                perc_rel_tol = 1e-3
 
                 figure_grid = 220
                 plt.subplot(figure_grid + i)
             else:
-                perc_rel_tol = 1e-2
+                perc_rel_tol = 1e-3
 
                 figure_grid = 120
                 plt.subplot(figure_grid + i)
 
-            cplex_times = np.zeros((len(exponents), len(tails)))
-            nr_times = np.zeros((len(exponents), len(tails)))
-            bsc_times = np.zeros((len(exponents), len(tails)))
+            cplex_times = np.zeros((len(exponents), len(temp_tails)))
+            nr_times = np.zeros((len(exponents), len(temp_tails)))
+            bsc_times = np.zeros((len(exponents), len(temp_tails)))
 
             nr_iters_ = np.zeros(len(exponents))
             bs_iters_ = np.zeros(len(exponents))
             cplex_infeas_ = np.zeros(len(exponents))
 
             for exponent in exponents:
+
                 bs_iter_list = []
                 nr_iter_list = []
                 cplex_infeas_list = []
@@ -338,30 +343,64 @@ def graph_comparison():
 
                     cut_idx = None
                     weird = False
-                    network = base + atype + exponent + tail
-                    filename = experiment + '/' + base + '/' + network
-                    data_dic = load_run(filename)
-                    cplex_times[row, col] = data_dic['solver_elapsed']
-                    cplex_obj = data_dic['solver_obj']
 
-                    cplex_iter_objs = data_dic['solver_primals']
-                    cplex_duals = data_dic['solver_duals']
+                    if exponent != '15':
+                        network = base + atype + exponent + tail
+                        filename = experiment + '/' + base + '/' + network
+                        data_dic = load_run(filename)
+                        cplex_times[row, col] = data_dic['solver_elapsed']
+                        cplex_obj = data_dic['solver_obj']
 
-                    cplex_gaps = 100*abs(np.array(cplex_iter_objs[:-1]) - np.array(cplex_duals))/np.minimum(np.array(cplex_iter_objs[:-1]),np.array(cplex_duals))
+                        cplex_iter_objs = data_dic['solver_primals']
+                        cplex_duals = data_dic['solver_duals']
 
-                    cplex_iter_times = data_dic['solver_iter_times']
-                    cplex_feasible = data_dic['solver_feasible']
+                        cplex_gaps = 100*abs(np.array(cplex_iter_objs[:-1]) - np.array(cplex_duals))/np.minimum(np.array(cplex_iter_objs[:-1]),np.array(cplex_duals))
 
-                    cplex_iter_objs[-1] = cplex_obj
+                        cplex_iter_times = data_dic['solver_iter_times']
+                        cplex_feasible = data_dic['solver_feasible']
 
-                    nr_iter_objs = data_dic['nr_iter_objs']
-                    nr_iter_elapsed = data_dic['nr_iter_elapsed']
+                        cplex_iter_objs[-1] = cplex_obj
 
-                    bs_iter_objs = data_dic['bs_iter_objs']
-                    bs_iter_elapsed = data_dic['bs_iter_elapsed']
+                        nr_iter_objs = data_dic['nr_iter_objs']
+                        nr_iter_elapsed = data_dic['nr_iter_elapsed']
 
-                    lb_elapsed = data_dic['elapsed_lower_bound']
-                    ub_elapsed = data_dic['elapsed_upper_bound']
+                        bs_iter_objs = data_dic['bs_iter_objs']
+                        bs_iter_elapsed = data_dic['bs_iter_elapsed']
+
+                        lb_elapsed = data_dic['elapsed_lower_bound']
+                        ub_elapsed = data_dic['elapsed_upper_bound']
+                    else:
+                        network = base + atype + exponent + tail
+                        filename = experiment + '/' + base + '/' + network + '_cp_results'
+                        cp_dic = load_run(filename)
+
+                        filename = experiment + '/' + base + '/' + network + '_nr_results'
+                        nr_dic = load_run(filename)
+
+                        filename = experiment + '/' + base + '/' + network + '_bs_results'
+                        bs_dic = load_run(filename)
+
+                        cplex_times[row, col] = cp_dic['solver_elapsed']
+                        cplex_obj = cp_dic['solver_obj']
+
+                        cplex_iter_objs = cp_dic['solver_primals']
+                        cplex_duals = cp_dic['solver_duals']
+
+                        cplex_gaps = 100*abs(np.array(cplex_iter_objs[:-1]) - np.array(cplex_duals))/np.minimum(np.array(cplex_iter_objs[:-1]),np.array(cplex_duals))
+
+                        cplex_iter_times = cp_dic['solver_iter_times']
+                        cplex_feasible = cp_dic['solver_feasible']
+
+                        cplex_iter_objs[-1] = cplex_obj
+
+                        nr_iter_objs = nr_dic['nr_iter_objs']
+                        nr_iter_elapsed = nr_dic['nr_iter_elapsed']
+
+                        bs_iter_objs = bs_dic['bs_iter_objs']
+                        bs_iter_elapsed = bs_dic['bs_iter_elapsed']
+
+                        lb_elapsed = bs_dic['elapsed_lower_bound']
+                        ub_elapsed = bs_dic['elapsed_upper_bound']
 
                     nr_iter_elapsed = lb_elapsed + np.array(nr_iter_elapsed)
                     bs_iter_elapsed = lb_elapsed + \
@@ -435,13 +474,13 @@ def graph_comparison():
 
                                 if iter_objs[0] > iter_objs[1]:
                                     for p in range(len(iter_objs)):
-                                        if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol * 1e-1):
+                                        if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
                                             ind = p
                                             break
 
                                 else:
                                     for p in range(len(iter_objs) - 1, 0, -1):
-                                        if not am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol * 1e-1):
+                                        if not am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
                                             ind = p
                                             break
                                     if p + 1 != len(iter_objs):
@@ -454,34 +493,44 @@ def graph_comparison():
 
                         return ind
 
-                    def find_indices(iter_objs, algo, common, common_2):
+                    def find_indices(iter_objs, algo, common, common_2=None):
                         ind = get_indices(algo, iter_objs, common, common_2)
 
                         return ind
 
-                    if data_dic['solver_infeas'] < 1e-6:
+                    # if data_dic['solver_infeas'] < 1e-6:
 
-                        order = [min(nr_iter_objs), min(bs_iter_objs), cplex_obj]
-                        order = np.array(order)
+                    #     order = [min(nr_iter_objs), min(bs_iter_objs), cplex_obj]
+                    #     order = np.array(order)
 
-                        common = max(order)
-                        common_ind = np.argmax(order)
+                    #     common = max(order)
+                    #     common_ind = np.argmax(order)
 
-                        order = np.delete(order, common_ind)
-                        common_2 = max(order)
+                    #     order = np.delete(order, common_ind)
+                    #     common_2 = max(order)
 
-                        nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
-                        bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
-                        cp_i = find_indices(
-                            cplex_iter_objs, 'cplex', common, common_2)
+                    #     nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
+                    #     bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
+                    #     cp_i = find_indices(
+                    #         cplex_iter_objs, 'cplex', common, common_2)
 
+                    # else:
+                    #     common = max(min(nr_iter_objs), min(bs_iter_objs))
+
+                    #     nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
+                    #     bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
+                    #     cp_i = find_indices(
+                    #         cplex_iter_objs, 'cplex', common, common_2)
+
+                    if cplex_iter_objs[0] > cplex_iter_objs[1]:
+                        common = min(min(nr_iter_objs), min(bs_iter_objs))
                     else:
-                        common = max(min(nr_iter_objs), min(bs_iter_objs))
+                        common = min(min(nr_iter_objs), min(bs_iter_objs), min(cplex_iter_objs))
 
-                        nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
-                        bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
-                        cp_i = find_indices(
-                            cplex_iter_objs, 'cplex', common, common_2)
+
+                    nr_i = find_indices(nr_iter_objs, 'nr', common)
+                    bs_i = find_indices(bs_iter_objs, 'bs', common)
+                    cp_i = find_indices(cplex_iter_objs, 'cplex', common)
 
                     if nr_i is None:
                         nr_i = len(nr_iter_elapsed) - 1
@@ -496,24 +545,23 @@ def graph_comparison():
                     # print('nr_iter_objs: ', nr_iter_objs)
                     # print('bs_iter_objs: ', bs_iter_objs)
                     # print('---------')
-                    # print('nr_obj: ', nr_iter_objs[nr_i])
-                    # print('bs_obj: ', bs_iter_objs[bs_i])
+                    
+                    print('nr_obj: ', nr_iter_objs[nr_i])
+                    print('bs_obj: ', bs_iter_objs[bs_i])
+                    print('cp_obj: ', cplex_iter_objs[cp_i])
                     # try:
 
                     #     print('cplex end obj: ', cplex_iter_objs[cp_i])
                     # except:
                     #     pdb.set_trace()
                     # print('cplex_gap: ', cplex_gaps[cp_i])
-    
+                    
                     # print('nr_tm: ', nr_iter_elapsed[nr_i])
                     # print('bs_tm: ', bs_iter_elapsed[bs_i])
                     # print('cplex end tm: ', cplex_iter_times[cp_i])
-                    # print('cplex last tm: ', cplex_iter_times[-1])
-                    # print('infeas: ', data_dic['solver_infeas'])
-                    # print('status: ', data_dic['solver_status'])
                     # print('&&&&&&&&&&&&')
 
-                    cplex_times[row, col] = cplex_iter_times[-1]
+                    cplex_times[row, col] = cplex_iter_times[cp_i]
 
                     nr_elapsed = nr_iter_elapsed[nr_i]
                     bs_elapsed = bs_iter_elapsed[bs_i]
@@ -547,13 +595,7 @@ def graph_comparison():
             family_name = base.upper() + '-' + family_type.upper() + '  (m=' + num_arcs + ')'
             graph_family(family_name, cplex_times, nr_times,
                          bsc_times, nr_iters_, bs_iters_, cplex_infeas_)
-        # plt.subplots.adjust(hspace = 0.2)
         plt.tight_layout(pad=1.5)
-
-        # if base == 'netgen':
-        #     plt.plot([0.5, 0.5], [0, 1], marker=',', color='lightgreen', lw=1 ,transform=plt.gcf().transFigure, clip_on=False)
-        #     plt.plot([0, 1], [0.5, 0.5], marker=',', color='lightgreen', lw=1 ,transform=plt.gcf().transFigure, clip_on=False)
-
         save_fig('comparison_' + base.lower())
         plt.clf()
 
@@ -617,17 +659,20 @@ def graph_lambar_experiments():
 
     experiment = 'varying_lambar'
     bases = ['netgen']
-    tails = ['a','b','c','d','e']
+    tails = ['a','b','c','d','e','f','g','h','j','k']
+
     exponents = np.array(['12'])
     types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
 
     lams = np.array([0.01, 10, 1000])
 
 
-    plt.figure(figsize=(16, 8))
+    # plt.figure(figsize=(16, 8))
     for base in bases:
         i = 0
         for atype in types:
+            plt.figure(figsize=(16, 8))
+
             if base == 'goto' and atype.find('lo') >= 0:
                 continue
 
@@ -637,8 +682,8 @@ def graph_lambar_experiments():
 
                 perc_rel_tol = 1e-2
 
-                figure_grid = 220
-                plt.subplot(figure_grid + i)
+                # figure_grid = 220
+                # plt.subplot(figure_grid + i)
             else:
 
                 perc_rel_tol = 1e-2
@@ -695,11 +740,6 @@ def graph_lambar_experiments():
                             ub_elapsed + np.array(bs_iter_elapsed)
 
 
-                        for _ind in range(len(cplex_iter_objs) - 1, 0, -1):
-                            if not am_i_close(cplex_iter_objs[_ind], cplex_iter_objs[_ind - 1], perc_rel_tol=1e-7):
-                                cplex_iter_objs = cplex_iter_objs[:_ind + 1]
-                                cplex_iter_times = cplex_iter_times[:_ind + 1]
-                                break
 
                         def get_indices(algo, iter_objs, common, common_2):
 
@@ -738,13 +778,13 @@ def graph_lambar_experiments():
 
                                     if iter_objs[0] > iter_objs[1]:
                                         for p in range(len(iter_objs)):
-                                            if am_i_close(iter_objs[p], iter_objs[p+1], perc_rel_tol=perc_rel_tol * 1e-5):
+                                            if am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
                                                 ind = p
                                                 break
 
                                     else:
                                         for p in range(len(iter_objs) - 1, 0, -1):
-                                            if not am_i_close(iter_objs[p], iter_objs[p-1], perc_rel_tol=perc_rel_tol * 1e-5):
+                                            if not am_i_close(iter_objs[p], common, perc_rel_tol=perc_rel_tol):
                                                 ind = p
                                                 break
                                         if p + 1 != len(iter_objs):
@@ -775,19 +815,19 @@ def graph_lambar_experiments():
 
                             nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
                             bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
-                            # cp_i = find_indices(
-                            #     cplex_iter_objs, 'cplex', common, common_2)
+                            cp_i = find_indices(
+                                cplex_iter_objs, 'cplex', common, common_2)
 
                         else:
                             common = max(min(nr_iter_objs), min(bs_iter_objs))
 
                             nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
                             bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
-                            # cp_i = find_indices(
-                            #     cplex_iter_objs, 'cplex', common, common_2)
+                            cp_i = find_indices(
+                                cplex_iter_objs, 'cplex', common, common_2)
 
 
-                        cplex_times[row, col] = cplex_iter_times[-1]
+                        cplex_times[row, col] = cplex_iter_times[cp_i]
 
                         nr_elapsed = nr_iter_elapsed[nr_i]
                         bs_elapsed = bs_iter_elapsed[bs_i]
@@ -808,28 +848,35 @@ def graph_lambar_experiments():
             r_bsc = [x + barWidth for x in r_nr]
             r_cplex = [x + 2 * barWidth for x in r_nr]
 
-            plt.rcParams["font.size"] = 8
-            plt.bar(r_nr, elapsed[0, :], width=barWidth, hatch='///', edgecolor='#b7fe00',
-                    color='#b7fe00', ecolor='#c6ccce', alpha=0.8, capsize=5, label='NR')
-            plt.bar(r_bsc, elapsed[1, :], width=barWidth, hatch='\\\\\\', edgecolor='#FF4500', color='#FF4500',
-                    ecolor='#c6ccce', alpha=0.8, capsize=5, label='BSC')
+            # plt.rcParams["font.size"] = 14
+
             plt.bar(r_cplex, elapsed[2, :], width=barWidth, hatch='xxx', edgecolor='#087efe', color='#087efe',
                     ecolor='#c6ccce', alpha=0.8,  capsize=5, label='CPLEX')
 
+            plt.bar(r_bsc, elapsed[1, :], width=barWidth, hatch='\\\\\\', edgecolor='#FF4500', color='#FF4500',
+                    ecolor='#c6ccce', alpha=0.8, capsize=5, label='BSC')
+
+            plt.bar(r_nr, elapsed[0, :], width=barWidth, hatch='///', edgecolor='#b7fe00',
+                    color='#b7fe00', ecolor='#c6ccce', alpha=0.8, capsize=5, label='NR')
+            
+            
+
             # tap_means_scaled[i]/2
             for pind in r_nr:
-                plt.annotate('{0:1.1f}'.format(elapsed[0, pind]), (pind, 0), textcoords='offset points', xytext=(
-                    0, 20), ha='center', va='bottom', rotation=70, size=8)
-                plt.annotate('{0:1.1f}'.format(elapsed[1, pind]), (pind + barWidth, 0), textcoords='offset points', xytext=(
-                    0, 20), ha='center', va='bottom', rotation=70,  size='smaller')
+                
+                
                 plt.annotate('{0:1.1f}'.format(elapsed[2, pind]), (pind + 2 * barWidth, 0), textcoords='offset points', xytext=(
-                    0, 20), ha='center', va='bottom', rotation=70,  size='smaller')
+                    0, 20), ha='center', va='bottom', rotation=70,  size=20)
+                plt.annotate('{0:1.1f}'.format(elapsed[1, pind]), (pind + barWidth, 0), textcoords='offset points', xytext=(
+                    0, 20), ha='center', va='bottom', rotation=70,  size=20)
+                plt.annotate('{0:1.1f}'.format(elapsed[0, pind]), (pind, 0), textcoords='offset points', xytext=(
+                    0, 20), ha='center', va='bottom', rotation=70, size=20)
 
-            plt.ylabel('Running time')
+            plt.ylabel('Running time', fontsize=24)
 
             plt.xticks([(r + barWidth) for r in range(3)],
-                       [r'$\bar\lambda$' + '=0.01', r'$\bar\lambda$' + '=10', r'$\bar\lambda$' + '=1000'])
-
+                       [r'$\bar\lambda$' + '=0.01', r'$\bar\lambda$' + '=10', r'$\bar\lambda$' + '=1000'], fontsize=20)
+            plt.yticks(fontsize=20)
             family_type = atype.strip('_')
             if atype == '_8_':
                 num_arcs = '8n'
@@ -845,18 +892,19 @@ def graph_lambar_experiments():
 
             family_name = base.upper() + '-' + family_type.upper() + '  (m=' + num_arcs + ')'
 
-            plt.title(family_name, fontsize=7)
-
+            plt.title(family_name, fontsize=24)
+            plt.tight_layout()
             # plt.figtext(0.5, 0.01, txt, wrap=True,
             #             ha='center', va="bottom", fontsize=7)
-            plt.legend(fontsize=8)
+            plt.legend(fontsize=24)
         # plt.suptitle('Performance sensitivity to ' + r'$\lambda$')
-        save_fig('varying_lambar', tight_layout=True)
+            save_fig('varying_lambar_' + family_type.lower().replace('_',''), tight_layout=True)
+            plt.clf()
 
 # graph_gap_levels()
-graph_lambar_experiments()
+# graph_lambar_experiments()
 # graph_base_vs_reliable()
-# graph_comparison()
+graph_comparison()
 
 
 

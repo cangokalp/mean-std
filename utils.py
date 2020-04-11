@@ -151,7 +151,7 @@ def load_data(networkFileName, G, generator='netgen'):
     np.random.seed(seed=99)
     try:
         # with open(networkFileName, "r") as networkFile:
-        #         pdb.set_trace()
+        
         with gzip.open(networkFileName + '.gz', 'rt') as networkFile:
 
             fileLines = networkFile.read().splitlines()
@@ -182,7 +182,9 @@ def load_data(networkFileName, G, generator='netgen'):
                 total_supply = int(metadata['Total supply'])
                 skltn_max_arc_perc = int(metadata['With max cost'][:-1])
                 skltn_cap_arc_perc = int(metadata['Capacitated'][:-1])
+                # random_seed = int(metadata['randnew seed'])
                 random_seed = int(metadata['Random seed'])
+
 
             for line in fileLines[metadata['END OF METADATA']:]:
                 # Ignore n and p and blank lines

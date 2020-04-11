@@ -51,7 +51,6 @@ class TimeLimitCallback(BarrierCallback):
             self.aborted = 1
             self.abort()
 
-
         # if self.is_primal_feasible():
         #     rel_gap = abs(dual - primal) / primal
         #     if rel_gap < self.acceptablegap:
@@ -183,7 +182,6 @@ def cvxpy_solve(G, cvxpy=False, fusion=False, run_name='.', acceptablegap=1e-8):
         prob.solve()
         sol = prob.solution
 
-
         obj = prob.solution.get_objective_value()
         soln = np.array(prob.solution.get_values())
 
@@ -298,66 +296,115 @@ def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='
 def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', iters=0, cvxpy=False, acceptablegap=1e-3, callback=True):
 
     start = time.time()
-    trial = True
+    trial = False
+    cvxpy = False
     if cvxpy:
 
-        xi = cp.Variable(G.m)
-        x_ = soln
-        constraints = [G.A@xi == 0, -x_ <= xi, xi <= G.cap]
+        # xi = cp.Variable(G.m)
+        # x_ = soln
+        # constraints = [G.A@xi == 0, -x_ <= xi, xi <= G.cap]
 
-        diff = x_ - G.cap
-        x_zero = np.argwhere(abs(x_) < 1e-6).ravel().astype(int)
-        x_nonzero = np.argwhere(x_ > 1e-6).ravel().astype(int)
-        x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
+        # diff = x_ - G.cap
+        # x_zero = np.argwhere(abs(x_) < 1e-6).ravel().astype(int)
+        # x_nonzero = np.argwhere(x_ > 1e-6).ravel().astype(int)
+        # x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
+        # x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
+        # diff_ = G.cap[x_btw] - x_[x_btw]
+
+        # # if len(x_zero) > 0:
+        # # constraints.append(xi[x_zero] == np.zeros(len(x_zero)))
+
+        # if len(x_u) > 0:
+        #     constraints.append(xi[x_u] <= np.zeros(len(x_u)))
+        #     constraints.append(xi[x_u] >= -x_[x_u])
+
+        # if len(x_btw) > 0:
+        #     constraints.append(xi[x_btw] <= diff_)
+        #     constraints.append(xi[x_btw] >= -x_[x_btw])
+
+        # objective = cp.Minimize(
+        #     G.lam * G.var.T * cp.square(xi) + 2 * np.multiply(G.var, x_).T * xi)
+        # prob = cp.Problem(objective, constraints)
+
+        # result = prob.solve(solver='MOSEK', verbose=False)
+        # cvx_soln = xi.value
+        # cvx_obj = objective.value
+
+        # cvx_elapsed = prob.solver_stats.solve_time
+        # elapsed = time.time() - start
+        # return elapsed, cvx_soln, None, None
+        import cvxpy as cp
+        x_zero = np.argwhere(abs(soln) < 1e-4).ravel().astype(int)
+        x_nonzero = np.argwhere(soln > 1e-4).ravel().astype(int)
+        diff = abs(np.array(soln) - np.array(G.cap))/np.minimum(np.array(G.cap), np.array(soln)) * 100
+        x_u = np.argwhere(abs(diff) < 1e-2).ravel().astype(int)
         x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
-        diff_ = G.cap[x_btw] - x_[x_btw]
 
-        # if len(x_zero) > 0:
-        # constraints.append(xi[x_zero] == np.zeros(len(x_zero)))
 
-        if len(x_u) > 0:
-            constraints.append(xi[x_u] <= np.zeros(len(x_u)))
-            constraints.append(xi[x_u] >= -x_[x_u])
+        xi = cp.Variable(len(x_btw))
+        x_ = soln
 
-        if len(x_btw) > 0:
-            constraints.append(xi[x_btw] <= diff_)
-            constraints.append(xi[x_btw] >= -x_[x_btw])
+        Gcols = []
+        Grows = []
+        Gvals = []
+        construct_dict = {}
+        construct_count = 0
+        nodeset = []
+
+        for ell in x_btw:
+            (u, v) = G.arc_dict[ell]
+            
+            Grows.append(u - 1)
+            Gcols.append(construct_count)
+            Gvals.append(1.0)
+            Grows.append(v - 1)
+            Gcols.append(construct_count)
+            Gvals.append(-1.0)
+            construct_count += 1
+            nodeset.append(u-1)
+            nodeset.append(v-1)
+
+
+        nodeset = list(set(nodeset))
+
+        nGrows = [nodeset.index(i) for i in Grows]
+        nGA = scipy.sparse.csc_matrix((Gvals, (nGrows, Gcols)))       
+
+        constraints = [nGA@xi == 0, -np.inf <= xi, xi <= np.inf]
 
         objective = cp.Minimize(
-            G.lam * G.var.T * cp.square(xi) + 2 * np.multiply(G.var, x_).T * xi)
+            G.lam * G.var[x_btw].T * cp.square(xi) + 2 * np.multiply(G.var[x_btw], x_[x_btw]).T * xi)
         prob = cp.Problem(objective, constraints)
 
-        result = prob.solve(solver='MOSEK', verbose=False)
+        result = prob.solve(solver='CPLEX', verbose=False)
         cvx_soln = xi.value
         cvx_obj = objective.value
 
         cvx_elapsed = prob.solver_stats.solve_time
         elapsed = time.time() - start
-        return elapsed, cvx_soln, None, None
+        
+        construct_soln = x_
+        construct_soln[x_btw] = cvx_soln
+        construct_soln[~x_btw] = 0
+
+        return elapsed, construct_soln, None, None
     else:
         if trial:
             warm_start = False
             diff = soln - G.cap
             x_ = soln
-            
-            x_zero = np.argwhere(abs(soln) < 1e-6).ravel().astype(int)
-            x_nonzero = np.argwhere(soln > 1e-6).ravel().astype(int)
-            
-            x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
+
+            x_zero = np.argwhere(abs(soln) < 1e-4).ravel().astype(int)
+            x_nonzero = np.argwhere(soln > 1e-4).ravel().astype(int)
+            diff = abs(np.array(soln) - np.array(G.cap))/np.minimum(np.array(G.cap), np.array(soln)) * 100
+            x_u = np.argwhere(abs(diff) < 1e-2).ravel().astype(int)
             x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
 
             diff_ = G.cap[x_btw] - x_[x_btw]
 
-            # b = np.r_[diff_, -x_[x_btw]]
-            
-            # names = [str(i) + 'S' for i in range(len(b))]
-            
             cols = np.r_[x_btw, x_btw]
-            # senses = np.r_[['L'] * len(x_btw), ['G'] * len(x_btw)]
 
             rows = np.arange(len(cols))
-            # values = np.ones(len(rows))
-
             if not warm_start:
 
                 prob = cplex.Cplex()
@@ -365,44 +412,44 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
                     obj = np.ones(len(x_btw))
                     prob.variables.add(obj=obj, lb=-x_[x_btw], ub=diff_)
                 else:
-                    prob.variables.add(lb=-x_[x_btw], ub=diff_)
+                    # prob.variables.add(lb=-x_[x_btw], ub=diff_)
+                    prob.variables.add(lb=-np.inf * np.ones(len(x_btw)), ub=np.inf * np.ones(len(x_btw)))
+
                     lin_coeffs = 2 * G.var[x_btw] * x_[x_btw]
                     quad_coeffs = lam * G.var[x_btw] * 2
                     prob.objective.set_linear(
                         [(int(i), j) for i, j in zip(np.arange(len(x_btw)), lin_coeffs)])
                     prob.objective.set_quadratic(quad_coeffs)
 
-
-                Gvals = []                
-                Grows = []
                 Gcols = []
-
+                Grows = []
+                Gvals = []
                 construct_dict = {}
                 construct_count = 0
                 nodeset = []
 
                 for ell in x_btw:
-                    (u,v) = G.arc_dict[ell]
-                    Grows.append(u-1)
+                    (u, v) = G.arc_dict[ell]
+                    
+                    Grows.append(u - 1)
                     Gcols.append(construct_count)
-                    Gvals.append(1)
-                    Grows.append(v-1)
+                    Gvals.append(1.0)
+                    Grows.append(v - 1)
                     Gcols.append(construct_count)
-                    Gvals.append(-1)
+                    Gvals.append(-1.0)
                     construct_count += 1
-
                     nodeset.append(u-1)
                     nodeset.append(v-1)
+
+
                 nodeset = list(set(nodeset))
 
-                def ind_map(elem):
-                    ind = nodeset.index(elem)
-                    return ind
+                nGrows = [nodeset.index(i) for i in Grows]
 
-                Grows = list(map(ind_map, Grows))                
-
-                prob.linear_constraints.add(rhs=np.zeros(len(nodeset)), senses='E' * len(nodeset))
-                prob.linear_constraints.set_coefficients(zip(Grows, Gcols, Gvals))
+                prob.linear_constraints.add(rhs=np.zeros(
+                    len(nodeset)), senses='E' * len(nodeset))
+                prob.linear_constraints.set_coefficients(
+                    zip(nGrows, Gcols, Gvals))
 
                 prob.objective.set_sense(prob.objective.sense.minimize)
                 prob.set_log_stream(None)
@@ -414,49 +461,54 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
         else:
             diff = soln - G.cap
             x_ = soln
-            x_zero = np.argwhere(abs(soln) < 1e-6).ravel().astype(int)
-            x_nonzero = np.argwhere(soln > 1e-6).ravel().astype(int)
-            x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
-            x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
+            x_zero = np.argwhere(abs(soln) < 1e-5).ravel().astype(int)
+            x_nonzero = np.argwhere(soln > 1e-5).ravel().astype(int)
+            x_u = np.argwhere(abs(diff) < 1e-5).ravel().astype(int)
+            x_btw = np.array(
+                list(set(x_nonzero).difference(set(x_u)))).astype(int)
 
             diff_ = G.cap[x_btw] - x_[x_btw]
-            # b = np.r_[np.zeros(len(x_zero)), np.zeros(
-                # len(x_u)), -x_[x_u], diff_, -x_[x_btw]]
-            b = np.r_[np.zeros(len(x_zero)), np.zeros(len(x_u)), diff_, -x_[x_btw]]
-            
-            names = [str(i) + 'S' for i in range(len(b))]
 
-            # cols = np.r_[x_zero, x_u, x_u, x_btw, x_btw]
-            # senses = np.r_[['E'] * len(x_zero), ['L'] * len(x_u), ['G']
-                           # * len(x_u), ['L'] * len(x_btw), ['G'] * len(x_btw)]
-            
-            cols = np.r_[x_zero, x_u, x_btw, x_btw]
-            senses = np.r_[['E'] * len(x_zero), ['E'] * len(x_u), ['L'] * len(x_btw), ['G'] * len(x_btw)]
+            b = np.r_[np.zeros(len(x_zero)), np.zeros(
+                len(x_u))]
 
-            rows = np.arange(len(cols))
-            values = np.ones(len(rows))
+            # cols = np.r_[x_zero, x_u]
+            # senses = np.r_[['E'] * len(x_zero), ['E'] * len(x_u)]
+
+            # rows = np.arange(len(cols))
+            # values = np.ones(len(rows))
 
             if not warm_start:
 
                 prob = cplex.Cplex()
                 if lp:
                     obj = np.ones(G.m)
-                    prob.variables.add(obj=obj, lb=-x_ * np.ones(G.m), ub=G.cap)
+                    prob.variables.add(obj=obj, lb=-x_ *
+                                       np.ones(G.m), ub=G.cap)
                 else:
-                    prob.variables.add(lb=-np.inf * np.ones(G.m), ub=G.cap)
+                    # prob.variables.add(lb=-np.inf * np.ones(G.m), ub=G.cap)
+                    prob.variables.add(lb=-np.inf * np.ones(G.m), ub=np.inf * np.ones(G.m))
+
                     lin_coeffs = 2 * G.var * x_
                     quad_coeffs = lam * G.var * 2
                     prob.objective.set_linear(
                         [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
-                    prob.objective.set_quadratic(quad_coeffs)
+                    if lam!=0:
+                        prob.objective.set_quadratic(quad_coeffs)
 
-                prob.linear_constraints.add(rhs=np.zeros(G.n), senses='E' * G.n)
+                prob.linear_constraints.add(
+                    rhs=np.zeros(G.n), senses='E' * G.n)
                 prob.linear_constraints.set_coefficients(
                     zip(G.rows, G.cols, G.values))
 
-                prob.linear_constraints.add(rhs=b, names=names, senses=senses)
-                prob.linear_constraints.set_coefficients(
-                    zip([int(i) for i in rows], [int(i) for i in cols], values))
+                prob.variables.set_lower_bounds(zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+                prob.variables.set_upper_bounds(zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+
+                # prob.linear_constraints.add(rhs=b, senses=senses)
+                # prob.linear_constraints.set_coefficients(
+                #     zip(rows.astype(int), cols.astype(int), values))
+                # prob.linear_constraints.set_coefficients(
+                    # zip([int(i) for i in rows], [int(i) for i in cols], values))
 
                 prob.objective.set_sense(prob.objective.sense.minimize)
                 prob.set_log_stream(None)
@@ -466,11 +518,18 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
                 prob.parameters.barrier.display.set(0)
             else:
 
-                prob.linear_constraints.delete(
-                    G.n, prob.linear_constraints.get_num() - 1)
-                prob.linear_constraints.add(rhs=b, names=names, senses=senses)
-                prob.linear_constraints.set_coefficients(
-                    zip([int(i) for i in rows], [int(i) for i in cols], values))
+                prob.variables.set_lower_bounds(zip([int(i) for i in range(G.m)], np.ones(G.m)*(-np.inf)))
+                prob.variables.set_upper_bounds(zip([int(i) for i in range(G.m)], np.ones(G.m)*(np.inf)))
+
+                prob.variables.set_lower_bounds(zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+                prob.variables.set_upper_bounds(zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+
+
+                # prob.linear_constraints.delete(
+                #     G.n, prob.linear_constraints.get_num() - 1)
+                # prob.linear_constraints.add(rhs=b, names=names, senses=senses)
+                # prob.linear_constraints.set_coefficients(
+                #     zip(rows.astype(int), cols.astype(int), values))
 
                 if not lp:
                     lin_coeffs = 2 * G.var * x_
@@ -483,14 +542,15 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
             timelim_cb = prob.register_callback(TimeLimitCallback)
             timelim_cb.acceptablegap = acceptablegap
             timelim_cb.aborted = 0
-
+        # pdb.set_trace()
         prob.solve()
 
         obj = prob.solution.get_objective_value()
         soln = np.array(prob.solution.get_values())
-        construct_soln = np.zeros(G.m)
-        construct_soln[x_btw] = soln
-        construct_soln[~x_btw] = 0
+        construct_soln = soln
+        # construct_soln = x_
+        # construct_soln[x_btw] = soln
+        # construct_soln[~x_btw] = 0
 
         elapsed = time.time() - start
 
@@ -501,7 +561,7 @@ def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='
         return elapsed, construct_soln, prob, max_infeas
 
 
-def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy=False):
+def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy=False, solver_obj=None):
     print('bsc')
 
     start = time.time()
@@ -542,6 +602,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
         # if f < 1e-4:
         #     acceptablegap = 1e-6
         lams.append(mid)
+        print(mid)
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
             G, mid, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy, acceptablegap=acceptablegap, callback=False)
 
@@ -587,7 +648,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
                 high = mid
             else:
                 low = mid
-        if iters > 7:
+        if iters > 30 or 100*abs(obj-solver_obj)/min(obj,solver_obj) < 1e-3:
             break
 
     elapsed = time.time() - start
@@ -599,7 +660,7 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
         return obj, elapsed, x, iter_objs, iter_elapsed, infeas.mean(), lams, fs
 
 
-def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird=False, cvxpy=False):
+def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird=False, cvxpy=False, solver_obj=None):
     print('nr')
     start = time.time()
     stop_tol = 1e-6
@@ -643,7 +704,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         if iters > 1:
             warm_start = True
             warm_start_xi = True
-
+        print(lam)
         lams.append(lam)
 
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
@@ -702,7 +763,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         if lp:
             lam = np.maximum(lam, np.zeros(G.m))
 
-        if iters > 3:
+        if iters > 9 or 100*abs(obj-solver_obj)/min(obj,solver_obj) < 1e-3:
             break
 
     elapsed = time.time() - start
@@ -932,7 +993,7 @@ def get_networks(experiment, tails, exponents, types, test=False, fam='netgen', 
                         lam_dir = str(lambar).replace('.', '_')
                         net_name = fam_base + atype + exponent + tail
                         cur_run = experiment + '/' + fam_base + \
-                            '/' + net_name[:net_name.find('.')]+ '_' + lam_dir
+                            '/' + net_name[:net_name.find('.')] + '_' + lam_dir
                         cur_run = os.path.join(
                             EXPERIMENT_PATH, cur_run + "." + extension)
                         if not test:
@@ -942,7 +1003,7 @@ def get_networks(experiment, tails, exponents, types, test=False, fam='netgen', 
                         else:
                             if not net_name in networks:
                                 networks.append(net_name)
-                        
+
             else:
 
                 for atype in types:
@@ -951,15 +1012,15 @@ def get_networks(experiment, tails, exponents, types, test=False, fam='netgen', 
                         '/' + net_name[:net_name.find('.')]
                     cur_run = os.path.join(
                         EXPERIMENT_PATH, cur_run + "." + extension)
-                    if not test:
-                        if not os.path.isfile(cur_run):
-                            networks.append(net_name)
-                    else:
-                        networks.append(net_name)
-            if experiment == 'varying_lambar' or experiment == 'base_vs_reliable':
-                continue
+                    # if not test:
+                    #     if not os.path.isfile(cur_run):
+                    #         networks.append(net_name)
+                    # else:
+                    networks.append(net_name)
+
 
     return networks
+
 
 def small_test_case():
     # testcase
@@ -989,7 +1050,8 @@ def small_test_case():
 
         pdb.set_trace()
 
-def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=False):
+
+def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=False, which='cp'):
     experiment = 'graph_families'
 
     for network in networks:
@@ -1011,40 +1073,99 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
             '/' + network[:network.find('.')]
         cplex_saved = experiment + '/' + generator + '/' + 'cplex' + \
             '/' + network[:network.find('.')] + "_cplex_results"
-        
-        
 
         cvxpy_alg = cvxpy
 
-        _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
-            G, lam=0, lp=True, cvxpy=cvxpy_alg)
-        var_cost = np.multiply(G.var, soln).dot(soln)
-        lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+
+        if network.find('15') >= 0:
+
+            cp_saved = experiment + '/' + generator + '/' + \
+                network[:network.find('.')] + "_cp_results"
+
+            if not os.path.isfile(os.path.join(EXPERIMENT_PATH, cp_saved) + '.pickle'):
+
+                status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                    G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+
+                keys = ['solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals',
+                    'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas']
+                values = [status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible,
+                    solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas]
+
+                run_dict = dict(zip(keys, values))
+
+                os.makedirs(cp_saved, exist_ok=True)
+
+                save_run(cp_saved, run_dict)
+ 
+            if which == 'nr':
+
+                nr_saved = experiment + '/' + generator + '/' + \
+                    network[:network.find('.')] + "_nr_results"
+
+                if not os.path.isfile(os.path.join(EXPERIMENT_PATH, nr_saved) + '.pickle'):
+                    filename = cp_saved
+                    data_dic = load_run(filename)
+                    solver_obj = data_dic['solver_obj']
+
+                    _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+                        G, lam=0, lp=True, cvxpy=cvxpy_alg)
+                    var_cost = np.multiply(G.var, soln).dot(soln)
+                    lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+
+                    nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
+                        G, lp=False, low=lam_low, high=G.lambar / 2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+
+                    keys = ['nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
+                                'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'elapsed_lower_bound']
+                    values = [nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
+                        nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, lb_elapsed]
+
+                    run_dict = dict(zip(keys, values))
+
+                    os.makedirs(nr_saved, exist_ok=True)
+
+                    save_run(nr_saved, run_dict)
+                continue
+
+            if which == 'bs':
+                bs_saved = experiment + '/' + generator + '/' + \
+                    network[:network.find('.')] + "_bs_results"
+
+                if not os.path.isfile(os.path.join(EXPERIMENT_PATH, bs_saved) + '.pickle'):
+                    filename = cp_saved
+                    data_dic = load_run(filename)
+                    solver_obj = data_dic['solver_obj']
 
 
-        nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
-            G, lp=False, low=lam_low, high=G.lambar / 2.0, lam_init=lam_low, cvxpy=cvxpy_alg)
+                    _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+                        G, lam=0, lp=True, cvxpy=cvxpy_alg)
+                    var_cost = np.multiply(G.var, soln).dot(soln)
+                    lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
 
 
-        _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
-            G, lam=0, lp=False, bound_lam=True, cvxpy=cvxpy_alg, acceptablegap=1e-2)
-        var_cost = np.multiply(G.var, soln).dot(soln)
-        lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+                    _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
+                        G, lam=0, lp=False, bound_lam=True, cvxpy=cvxpy_alg, acceptablegap=1e-2)
+                    var_cost = np.multiply(G.var, soln).dot(soln)
+                    lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+
+                    bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
+                    G, lp=False, low=lam_low, high=lam_high, cvxpy=cvxpy_alg,solver_obj=solver_obj)
+
+                    keys = ['bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas',
+                        'bs_lams', 'bs_fs', 'elapsed_lower_bound', 'elapsed_upper_bound', ]
+                    values = [bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed,
+                        bs_avg_infeas, bs_lams, bs_fs, lb_elapsed, ub_elapsed]
+
+                    run_dict = dict(zip(keys, values))
+
+                    os.makedirs(bs_saved, exist_ok=True)
+
+                    save_run(bs_saved, run_dict)
+                continue
 
 
-        bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
-            G, lp=False, low=lam_low, high=lam_high, cvxpy=cvxpy_alg)
-
-        bs_elapsed += lb_elapsed + ub_elapsed
-        print('BSC finished in {} seconds, with objective {}'.format(
-            bs_elapsed, bs_obj))
-
-        nr_elapsed += lb_elapsed
-
-        print('NR finished in {} seconds, with objective {}'.format(
-            nr_elapsed, nr_obj))
-
-
+        # continue
         if not os.path.isfile(os.path.join(EXPERIMENT_PATH, cplex_saved) + '.pickle'):
             status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
                 G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
@@ -1052,12 +1173,126 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
         else:
             filename = cplex_saved
             data_dic = load_run(filename)
+
+            status = data_dic['solver_status']
+            feasible = data_dic['solver_feasible']
             solver_elapsed = data_dic['solver_elapsed']
             solver_obj = data_dic['solver_obj']
+            solver_duals = data_dic['solver_duals']
+            solver_primals = data_dic['solver_primals']
+            solver_is_feasible =data_dic['solver_is_feasible']
+            solver_primal_infeas = data_dic['solver_primal_infeas']
+            solver_iter_times = data_dic['solver_iter_times']
+            solver_feasible_dual = data_dic['solver_feasible_dual']
+            solver_feasible_primal = data_dic['solver_feasible_primal']
             solver_infeas = data_dic['solver_infeas']
 
         print('Solver finished in {} seconds, with objective {}'.format(
             solver_elapsed, solver_obj))
+
+
+        # _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+        #     G, lam=0, lp=True, cvxpy=cvxpy_alg)
+        # var_cost = np.multiply(G.var, soln).dot(soln)
+        # lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+        # print('lb_elapsed: ', lb_elapsed)
+        lb_elapsed = 0
+        lam_low = 1e-6
+        print(lam_low)
+# 
+
+        if not os.path.isfile(os.path.join(EXPERIMENT_PATH, run_name) + '.pickle'):
+
+
+            nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
+                    G, lp=False, low=lam_low, high=G.lambar / 2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+            nr_elapsed += lb_elapsed
+
+            can_nr_elapsed = np.array(nr_iter_elapsed) + lb_elapsed
+            can_nr_gaps = abs(np.array(nr_iter_objs) - solver_obj)/np.minimum(np.array(nr_iter_objs), solver_obj)
+
+            print(can_nr_elapsed)
+            print(can_nr_gaps)
+
+            print('NR finished in {} seconds, with objective {}'.format(
+                nr_elapsed, nr_obj))
+        else:
+            filename = run_name
+            data_dic = load_run(filename)
+
+            nr_elapsed = data_dic['nr_elapsed']
+            nr_iter_elapsed = data_dic['nr_iter_elapsed']
+            nr_iter_objs = data_dic['nr_iter_objs']
+            nr_obj = data_dic['nr_obj']
+            nr_xi_times = data_dic['nr_xi_times']
+            nr_var_times = data_dic['nr_var_times']
+            mean = data_dic['mean']
+            var = data_dic['var']
+            nr_avg_infeas = data_dic['nr_avg_infeas']
+            nr_lams = data_dic['nr_lams']
+            nr_fs = data_dic['nr_fs']
+
+
+
+
+
+        if not os.path.isfile(os.path.join(EXPERIMENT_PATH, run_name) + '.pickle'):
+
+            # _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
+            #     G, lam=0, lp=False, bound_lam=True, cvxpy=cvxpy_alg, acceptablegap=1e-2)
+            # var_cost = np.multiply(G.var, soln).dot(soln)
+            # lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+            ub_elapsed = 0
+            lam_high = G.lambar / 2.0
+            print(lam_high)
+
+            print('ub_elapsed: ', ub_elapsed)
+            bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
+            G, lp=False, low=lam_low, high=lam_high, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+
+
+            can_bs_elapsed = np.array(bs_iter_elapsed) + lb_elapsed + ub_elapsed
+            can_bs_gaps = abs(np.array(bs_iter_objs) - solver_obj)/np.minimum(np.array(bs_iter_objs), solver_obj)
+
+            print(can_bs_elapsed)
+            print(can_bs_gaps)
+
+
+
+            bs_elapsed += lb_elapsed + ub_elapsed
+            print('BSC finished in {} seconds, with objective {}'.format(
+                bs_elapsed, bs_obj))
+
+        else:
+
+            filename = run_name
+            data_dic = load_run(filename)
+
+            lb_elapsed = data_dic['elapsed_lower_bound']
+            ub_elapsed = data_dic['elapsed_upper_bound']
+            bs_obj = data_dic['bs_obj']
+            bs_iter_elapsed = data_dic['bs_iter_elapsed']
+            bs_iter_objs = data_dic['bs_iter_objs']
+            bs_elapsed = data_dic['bs_elapsed']
+            bs_avg_infeas =data_dic['bs_avg_infeas']
+            bs_lams = data_dic['bs_lams']
+            bs_fs = data_dic['bs_fs']
+
+
+
+        # _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+        #     G, lam=0, lp=True, cvxpy=cvxpy_alg)
+        # var_cost = np.multiply(G.var, soln).dot(soln)
+        # lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+        # print('lam_low: ', lam_low)
+
+
+
+
+
+           
+
+
 
 
         if cvxpy:
@@ -1080,17 +1315,19 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
                 solver_obj - bs_obj) / bs_obj, round(bs_avg_infeas, 3)])
         
         print(t)
+
+
         if record:
 
             # solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
 
-            keys = ['network_name', 'G', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
+            keys = ['network_name', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
                     'nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
                     'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'lambar', 'm', 'n',
                     'elapsed_lower_bound', 'elapsed_upper_bound',
                     'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs']
 
-            values = [network[:network.find('.')], G, status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
+            values = [network[:network.find('.')], status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
                       nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
                       nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, G.lambar, G.m, G.n, lb_elapsed, ub_elapsed,
                       bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs]
@@ -1145,11 +1382,11 @@ def varying_lambda_experiment(networks, lambars, record=True):
             _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(G, lam=0, lp=True)
             var_cost = np.multiply(G.var, soln).dot(soln)
             lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+            lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
 
-            lam_high = G.lambar / 2.0
 
             nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
-                G, lp=False, low=lam_low, high=lam_high, lam_init=lam_low)
+                G, lp=False, low=lam_low, high=lam_high, lam_init=lam_low, solver_obj=solver_obj)
 
             nr_elapsed += lb_elapsed
 
@@ -1160,9 +1397,8 @@ def varying_lambda_experiment(networks, lambars, record=True):
                 G, lam=0, lp=False, bound_lam=True, acceptablegap=1e-3, callback=False)
             var_cost = np.multiply(G.var, soln).dot(soln)
             lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
-
             bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
-                G, lp=False, low=lam_low, high=lam_high)
+                G, lp=False, low=lam_low, high=lam_high, solver_obj=solver_obj)
 
             bs_elapsed += lb_elapsed + ub_elapsed
             print('BSC finished in {} seconds, with objective {}'.format(
@@ -1182,13 +1418,13 @@ def varying_lambda_experiment(networks, lambars, record=True):
 
                 # solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
 
-                keys = ['network_name', 'G', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
+                keys = ['network_name', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
                         'nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
                         'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'lambar', 'm', 'n',
                         'elapsed_lower_bound', 'elapsed_upper_bound',
                         'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs']
 
-                values = [network[:network.find('.')], G, status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
+                values = [network[:network.find('.')], status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
                           nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
                           nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, G.lambar, G.m, G.n, lb_elapsed, ub_elapsed,
                           bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs]
@@ -1198,6 +1434,8 @@ def varying_lambda_experiment(networks, lambars, record=True):
                 run_dict = dict(zip(keys, values))
 
                 save_run(run_name, run_dict)
+                del run_dict
+                del values
 
 def base_vs_reliable_expr(networks, lambars):
 
@@ -1291,42 +1529,45 @@ else:
 
 
 
+# print('starting lambar experiments')
+# lambars = [0.01, 10, 1000]
+# tails = ['f.min', 'g.min', 'h.min', 'j.min', 'k.min']
+# exponents = ['12']
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'varying_lambar'
+# networks = get_networks(experiment, tails, exponents, types, lams=lambars)
+# varying_lambda_experiment(networks, lambars)
 
-print('starting lambar experiments')
-lambars = [0.01, 10, 1000]
-tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
-exponents = ['12']
-types = ['_lo_8_', '_lo_sr_', '_sr_', '_8_']
-experiment = 'varying_lambar'
-networks = get_networks(experiment, tails, exponents, types, lams=lambars)
-varying_lambda_experiment(networks, lambars)
+
+# print("lambar: ",10)
+# print("loose interval")
+
+# lambar = 10
+# tails = ['e.min']
+# exponents = (np.arange(12, 13)).astype(str)
+# types = ['_sr_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion, which='cp')
 
 
 lambar = 10
 tails = ['e.min']
-exponents = (np.arange(12, 16)).astype(str)
-types = ['_8_', '_lo_8_', '_lo_sr_', '_sr_']
+exponents = (np.arange(12, 13)).astype(str)
+types = ['_sr_']
 experiment = 'graph_families'
 networks = get_networks(experiment, tails, exponents, types)
-graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion, which='cp')
 
 
 # lambar = 10
 # tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
 # exponents = (np.arange(12, 15)).astype(str)
-# types = ['_sr_', '_8_']
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
 # experiment = 'graph_families'
-# networks = get_networks(experiment, tails, exponents, types, fam='goto')
+# networks = get_networks(experiment, tails, exponents, types)
 # graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
-
-# lambar = 10
-# tails = ['e.min']
-# exponents = (np.arange(12, 16)).astype(str)
-# types = ['_sr_', '_8_']
-# experiment = 'graph_families'
-# networks = get_networks(experiment, tails, exponents, types, fam='goto')
-# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
 
 
@@ -1339,11 +1580,4 @@ graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 # networks = get_networks(experiment, tails, exponents, types)
 # base_vs_reliable_expr(networks, lambars)
 
-# lambar = 10
-# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
-# exponents = (np.arange(12, 15)).astype(str)
-# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
-# experiment = 'graph_families'
-# networks = get_networks(experiment, tails, exponents, types)
-# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 

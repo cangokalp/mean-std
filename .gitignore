@@ -9,3 +9,5 @@ saved_runs/
 .ipynb_checkpoints/
 .DS_Store
 generators/
+MCF_DiGraph.py
+useful.py
