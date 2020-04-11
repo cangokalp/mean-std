@@ -9,14 +9,6 @@ import scipy
 import numpy as np
 import gzip
 import math
-# from mosek.fusion import Expr, Set, Domain, ObjectiveSense, Matrix
-
-# import networkx as nx
-# import mosek
-
-# Where to save the figures
-GRAPH_LOC = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
-NMCC_LOC = '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt'
 
 PROJECT_ROOT_DIR = "."
 
@@ -27,62 +19,9 @@ EXPERIMENT_PATH = os.path.join(PROJECT_ROOT_DIR, "saved_runs")
 os.makedirs(EXPERIMENT_PATH, exist_ok=True)
 
 
-def round_up(n, decimals=0):
-    multiplier = 10 ** decimals
-    return math.ceil(n * multiplier) / multiplier
-
-def gen_instance(**kwargs):
-    """takes network parameters as input and outputs a file that can be read by the generator"""
-    pass
-
-
-def parse_cplex_log():
-    elapsed = []
-    objs = []
-
-    log = 'cplex_log.txt'
-    f = open(log, 'r+')
-
-    start_parsing = False
-    order_time = 0
-    presolve_time = 0
-    for line in f.readlines():
-        if start_parsing:
-            if count % 2 == 1:
-                line = line.strip()
-                elapsed.append(float(line[:line.find('s')]))
-
-            if count % 2 == 0:
-                partial = line[line.find(' '):].strip()
-                partial = partial[partial.find(' '):].strip()
-                objs.append(float(partial[:partial.find(' ')]))
-
-            count += 1
-
-        if line.find('Total time for automatic ordering') >= 0:
-            order_time = float(
-                line[line.find('=') + 1:line.find('sec')].strip())
-        if line.find('Itn') >= 0:
-            start_parsing = True
-            parse_obj = True
-            count = 0
-        if line.find('Presolve time') >= 0:
-            presolve_time = float(
-                line[line.find('=') + 1:line.find('sec')].strip())
-
-    f.close()
-
-    return elapsed, objs, presolve_time, order_time
-
-    
-
 def read_metadata(lines, generator='netgen'):
     """
-    Read metadata tags and values from a TNTP file, returning a dictionary whose
-    keys are the tags (strings between the <> characters) and corresponding values.
-    The last metadata line (reading <END OF METADATA>) is stored with a value giving
-    the line number this tag was found in.  You can use this to proceed with reading
-    the rest of the file after the metadata.
+    Read metadata tags and values from a netgen files
     """
     if generator == 'goto':
         metadata = dict()
@@ -110,7 +49,7 @@ def read_metadata(lines, generator='netgen'):
                 metadata['END OF METADATA'] = lineNumber
                 return metadata
 
-    if generator == 'netgen':
+    elif generator == 'netgen':
         metadata = dict()
         lineNumber = 0
         for line in lines:
@@ -150,7 +89,6 @@ def read_metadata(lines, generator='netgen'):
 def load_data(networkFileName, G, generator='netgen'):
     np.random.seed(seed=99)
     try:
-        # with open(networkFileName, "r") as networkFile:
         
         with gzip.open(networkFileName + '.gz', 'rt') as networkFile:
 
@@ -182,7 +120,6 @@ def load_data(networkFileName, G, generator='netgen'):
                 total_supply = int(metadata['Total supply'])
                 skltn_max_arc_perc = int(metadata['With max cost'][:-1])
                 skltn_cap_arc_perc = int(metadata['Capacitated'][:-1])
-                # random_seed = int(metadata['randnew seed'])
                 random_seed = int(metadata['Random seed'])
 
 
@@ -211,12 +148,6 @@ def load_data(networkFileName, G, generator='netgen'):
                 mu[i] = float(data[5])
 
                 cov_coef = np.random.uniform(0.15, 0.3)
-                # if mu[i] < max_arc_cost/3:
-                #     cov_coef = np.random.uniform(0.15, 0.45)
-                # if mu[i] >= max_arc_cost/3 and mu[i] < max_arc_cost/3*2:
-                #     cov_coef = np.random.uniform(0.30, 0.60)
-                # elif mu[i] >= max_arc_cost/3*2:
-                #     cov_coef = np.random.uniform(0.15, 0.45)
 
                 sigma = mu[i] * cov_coef
                 var[i] = sigma**2
@@ -233,7 +164,6 @@ def load_data(networkFileName, G, generator='netgen'):
                 G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i])
                 i += 1
 
-        # nx.set_node_attributes(G.nxg, 0, 'demand')
         G.mu = mu
         G.sigma = sigma
         G.var = var
@@ -252,117 +182,7 @@ def load_data(networkFileName, G, generator='netgen'):
         print("\nError reading network file %s" % networkFile)
         traceback.print_exc(file=sys.stdout)
 
-    # for solving the mcf with networkx library
-    # for line in fileLines[metadata['END OF METADATA']:]:
-    #     # Ignore n and p and blank lines
-
-    #     if line.find("n") == 0:
-    #         data = line.split()
-    #         G.nxg.node[int(data[1])]['demand'] = -int(data[2])
-
     return G
-
-
-class Logger(object):
-    """
-    Creates a class that will both print and log any
-    output text. See https://stackoverflow.com/a/5916874
-    for original source code. Modified to add date and
-    time to end of file name.
-    """
-
-    def __init__(self, run_dir):
-
-        # self.terminal = sys.stdout
-        self.filename = run_dir + 'mosek_log.txt'
-        self.log = open(self.filename, "w")
-
-    def write(self, message):
-        self.log.write(message)
-
-    def flush(self):
-        pass
-
-
-def read_nmcc(filename):
-    f = open(filename, 'r+')
-    nmcc = []
-
-    i = 0
-    for line in f.readlines():
-        i += 1
-        if i == 1:
-            nmcc_cost = line.strip()
-        else:
-            if line.find('@time_spent') >= 0:
-                nmcc_time_ms = float(
-                    line[line.find(':') + 1:]) * 1e-6
-            else:
-                nmcc.append(int(line) + 1)
-                # nmcc.append(int(line))
-
-    try:
-        nmcc.append(nmcc[0])
-    except:
-        pass
-
-    f.close()
-
-    return nmcc, nmcc_time_ms, nmcc_cost
-
-
-def solve_nmcc():
-
-    args = ("../dev/msmcf/msmcf/hello_lemon /Users/cgokalp/repos/dev/msmcf/residual_graph.lgf", "-c")
-    popen = subprocess.Popen(args, stdout=subprocess.PIPE, shell=True)
-    popen.wait()
-    output = popen.stdout.read()
-
-
-def output_graph(filename, g, G, ptype='sa'):
-    g = g.nxg
-    nodelist = g.nodes()
-    f = open(filename, 'w+')
-    f.write('@nodes\n')
-    f.write('label\n')
-    for node in nodelist:
-        f.write(str(node) + '\n')
-    f.write('@arcs\n')
-    f.write('                weight       label\n')
-    jj = 0
-
-    for u, v, e in g.edges(data=True):
-        jj += 1
-        try:
-            flow = G.nxg[u][v]['flow']
-            if ptype == 'sa':
-                w = G.nxg[u][v]['mu'] + \
-                    2 * G.lam * flow * G.nxg[u][v]['var']
-            elif ptype == 'xi':
-                w = 2 * curvar * G.nxg[u][v]['flow'] + \
-                    2 * G.lam * G.nxg[u][v]['xi'] * curvar
-            else:
-                w = G.nxg[u][v]['mu']
-            w = w
-            f.write(str(u) + '       ' + str(v) + '       ' +
-                    str((1.0) * w) + '       ' + str(u) + '\n')
-        except:
-            flow = G.nxg[v][u]['flow']
-            if ptype == 'sa':
-                w = G.nxg[v][u]['mu'] + \
-                    2 * G.lam * flow * G.nxg[v][u]['var']
-            elif ptype == 'xi':
-                w = 2 * curvar * G.nxg[v][u]['flow'] + \
-                    2 * G.lam * G.nxg[v][u]['xi'] * curvar
-            else:
-                w = G.nxg[v][u]['mu']
-            w = w 
-            f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                  * w) + '       ' + str(u) + '\n')
-    f.write('@attributes\n')
-    f.write('source ' + str(nodelist[0]) + '\n')
-    f.write('target ' + str(nodelist[-1]) + '\n')
-    f.close()
 
 
 def save_run(fname, data, extension='pickle', prefix=None):

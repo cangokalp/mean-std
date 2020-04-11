@@ -1,15 +1,10 @@
 from utils import *
-from MCF_DiGraph import *
-
-# import matplotlib.pyplot as plt
 import pandas
 import random
 import itertools
 import copy
 import cProfile
 import pstats
-# sys.path.append('/usr/local/Cellar/graph-tool/2.27_1/lib/python3.7/site-packages/')
-# import graph_tool as gt
 from prettytable import PrettyTable
 import caffeine
 from cplex.callbacks import BarrierCallback
@@ -28,17 +23,6 @@ class TimeLimit_LoggingCallback(BarrierCallback):
         dual = self.get_dual_objective_value()
         primal = self.get_objective_value()
 
-        # if self.is_primal_feasible():
-        #     print('feasible')
-        #     self.feasible_primal.append(primal)
-        #     self.feasible_dual.append(dual)
-            # rel_gap = abs(dual - primal) / primal
-            # if rel_gap < self.acceptablegap:
-            #     print('dual: ', dual)
-            #     print('primal: ', primal)
-            #     self.aborted = 1
-            #     self.abort()
-
 
 class TimeLimitCallback(BarrierCallback):
 
@@ -50,14 +34,6 @@ class TimeLimitCallback(BarrierCallback):
         if rel_gap < self.acceptablegap:
             self.aborted = 1
             self.abort()
-
-        # if self.is_primal_feasible():
-        #     rel_gap = abs(dual - primal) / primal
-        #     if rel_gap < self.acceptablegap:
-        #         # print('dual: ', dual)
-        #         # print('primal: ', primal)
-        #         self.aborted = 1
-        #         self.abort()
 
 
 def cvxpy_solve(G, cvxpy=False, fusion=False, run_name='.', acceptablegap=1e-8):
@@ -599,8 +575,6 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
         if iters > 1 and warm_start == False:
             warm_start = True
 
-        # if f < 1e-4:
-        #     acceptablegap = 1e-6
         lams.append(mid)
         print(mid)
         obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
@@ -610,7 +584,6 @@ def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy
         var_cost = np.multiply(G.var, x).dot(x)
         obj = G.mu.dot(x) + G.lambar * (np.sqrt(var_cost))
 
-        # soln_diff = np.linalg.norm(solver_soln - x)
         print(obj, time.time() - start, f)
 
         iter_objs.append(obj)
@@ -776,41 +749,7 @@ def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_wei
         return obj, elapsed, x, iter_objs, iter_elapsed, iter_xi_times, iter_var_times, mean, var,  infeas.mean(), lams, fs
 
 
-def plot_flam(G, answer):
-    import matplotlib.pyplot as plt
-    lambar_l = [1e1, 1e3, 1e5, 1e7]
-    for lambar in lambar_l:
-        sigma_cost = get_sigma_cost(G, 0)
-        lower_lam = lambar / (2 * sigma_cost)
-        sigma_cost = get_sigma_cost(G, lower_lam)
-        print('f_low: ', lower_lam - lambar / (2 * sigma_cost))
-        sigma_cost = get_sigma_cost(G, 1e9)
-        upper_lam = lambar / (2 * sigma_cost)
-        sigma_cost = get_sigma_cost(G, upper_lam)
-
-        print('f_high: ', upper_lam - lambar / (2 * sigma_cost))
-
-        print('lambar: ', lambar)
-        print('lower: ', lower_lam)
-        print('upper: ', upper_lam)
-        print('answer: ', answer)
-
-        lamlist = []
-        flamlist = []
-        for lam in np.linspace(lower_lam, upper_lam, num=100, endpoint=False):
-            sigma_cost = get_sigma_cost(G, lam)
-            flam = lam - lambar / (2 * sigma_cost)
-            lamlist.append(lam)
-            flamlist.append(flam)
-
-        print(lamlist[0], flamlist[0])
-        plt.plot(lamlist, flamlist, 'o')
-        plt.show()
-        pdb.set_trace()
-
-
-def alg3(**kwargs):
-    print('-----ALG3------')
+def hybrid(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy=False, solver_obj=None):
 
     if kwargs['G'] != None:
         G = copy.deepcopy(kwargs['G'])

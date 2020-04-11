@@ -10,12 +10,6 @@ from matplotlib.ticker import ScalarFormatter
 import matplotlib.ticker as mtick
 
 
-# plt.plot([7813, 7813], [0., 0.9], "r:")         # Not shown
-# plt.plot([-50000, 7813], [0.9, 0.9], "r:")      # Not shown
-# plt.plot([-50000, 7813], [0.4368, 0.4368], "r:")# Not shown
-# plt.plot([7813], [0.9], "ro")                   # Not shown
-# plt.plot([7813], [0.4368], "ro")                # Not shown
-
 def am_i_close(a, b, perc_rel_tol):
     if 100*abs(a - b) / min(a, b) <= perc_rel_tol:
         return True
@@ -32,10 +26,8 @@ def save_fig(fig_id, tight_layout=False, fig_extension="png", resolution=300):
 
 def mean_std(array):
 
-    # mean = array.nanmean(axis=1)
     mean = np.nanmean(np.where(array != 0, array, np.nan), 1)
     std = np.nanstd(np.where(array != 0, array, np.nan), 1)
-    # std = array.nanstd(axis=1)
     print(mean)
     return mean, std
 
@@ -69,34 +61,23 @@ def graph_family(family_name, cplex_times, nr_times, bsc_times, nr_iters_, bs_it
     plt.ylabel('Running time (logscale)', fontsize=12)
     plt.xlabel('Number of nodes', fontsize=12)
     plt.yscale('log')
-    # plt.xticks([])
-    # plt.tick_params(bottom='off')
-    # plt.xscale('log')
-    # plt.xticks(np.arange(min(np.log(node_num)), max(np.log(node_num)), 1.0))
-    # labels_ = [r'$2^{12}$', r'$2^{13}$', r'$2^{14}$']
-    # plt.xticks(node_num, labels_, rotation=45)  # Set text labels.
 
     if family_name.lower().find('sr') >= 0:
         plt.ylim(top=1e4)
         plt.ylim(bottom=1e0)
 
-        # plt.xlim(xmin=4000)
 
     else:
         plt.ylim(top=1e4)
         plt.ylim(bottom=1e0)
-        
-        # plt.xlim(xmin=4000)
-    # plt.axis([xs,xe,ys,ye])
 
     plt.grid(True)
     plt.title(family_name, fontsize=12)
     plt.legend(loc='upper left', fontsize=10)
 
 def graph_base_vs_reliable():
-    # graph base vs reliable
+
     experiment = 'base_vs_reliable'
-    # lams = [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 25, 50, 75, 100]#, 250, 500, 750, 1000]
     lams = np.logspace(-1, 3, 200)
     lams = [lams[i] for i in range(len(lams)) if i%4==0]
     exponent = '10'
@@ -147,13 +128,12 @@ def graph_base_vs_reliable():
     ax2.legend(loc='lower right', bbox_to_anchor= (0.4, 1.01), ncol=2,
             borderaxespad=0, frameon=False)
 
-    fig.tight_layout()  # otherwise the right y-label is slightly clipped
+    fig.tight_layout()  
     # ax1.set_xscale('log')
     # ax2.set_xscale('log')
 
     save_fig('mean_std_tradeoff')
     plt.clf()
-
 
     rel_gap = []
     for i in range(len(rel_obj)):
@@ -187,21 +167,7 @@ def graph_gap_levels():
         i = 0
         for atype in types:
 
-            if base == 'goto' and atype.find('lo') > 0:
-                continue
             i += 1
-            # if base == 'netgen':
-            #     perc_rel_tol = 1e-3
-
-            #     figure_grid = 220
-            #     plt.subplot(figure_grid + i)
-            # else:
-            #     perc_rel_tol = 1e-3
-
-            #     figure_grid = 120
-            #     plt.subplot(figure_grid + i)
-
-
             for exponent in exponents:
                 bs_iter_list = []
                 nr_iter_list = []
@@ -277,13 +243,11 @@ def graph_gap_levels():
                     #          1e-10, cplex_objs_e[tail][6]], "k:")  # Not shown
                     # plt.plot([0, nr_times_e[tail][0]], [cplex_objs_e[tail][
                     #          6], cplex_objs_e[tail][6]], "k:")  # Not shown
-
                     # plt.plot([7813], [0.9], "ko")                   # Not shown
 
                     plt.ylabel('Relative Objective Gap % (logscale)', fontsize=12)
                     plt.yscale('log')
                     plt.ylim(bottom=1e-5)
-                    # plt.xlim(left=0)
 
                     plt.xlabel('Running time', fontsize=12)
                     plt.grid(True)
@@ -296,7 +260,7 @@ def graph_comparison():
 
     experiment = 'graph_families'
 
-    bases = ['netgen']  # , 'goto']
+    bases = ['netgen'] 
     tails = ['a','b','c','d','e']
     exponents = (np.arange(12, 16)).astype(str)
     types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
@@ -406,20 +370,6 @@ def graph_comparison():
                     bs_iter_elapsed = lb_elapsed + \
                         ub_elapsed + np.array(bs_iter_elapsed)
 
-                    # continue
-
-                    # for nr_ind in range(len(nr_iter_objs) - 1, 0, -1):
-                    #     if not am_i_close(nr_iter_objs[nr_ind], nr_iter_objs[nr_ind - 1], perc_rel_tol=1e-8):
-
-                    #         nr_iter_objs = nr_iter_objs[:nr_ind + 1]
-                    #         nr_iter_elapsed = nr_iter_elapsed[:nr_ind + 1]
-                    #         break
-
-                    # for bs_ind in range(len(bs_iter_objs) - 1, 0, -1):
-                    #     if not am_i_close(bs_iter_objs[bs_ind], bs_iter_objs[bs_ind - 1], perc_rel_tol=1e-8):
-                    #         bs_iter_objs = bs_iter_objs[:bs_ind + 1]
-                    #         bs_iter_elapsed = bs_iter_elapsed[:bs_ind + 1]
-                    #         break
 
                     for _ind in range(len(cplex_iter_objs) - 1, 0, -1):
                         if not am_i_close(cplex_iter_objs[_ind], cplex_iter_objs[_ind - 1], perc_rel_tol=1e-7):
@@ -427,15 +377,6 @@ def graph_comparison():
                             cplex_iter_times = cplex_iter_times[:_ind + 1]
                             break
 
-                    # if atype == '_sr_' and exponent == '13' and (tail == 'a' or tail == 'e') and base == 'goto':
-                    #     nr_times_g[tail] = nr_iter_elapsed
-                    #     nr_objs_g[tail] = nr_iter_objs
-
-                    #     bs_times_g[tail] = bs_iter_elapsed
-                    #     bs_objs_g[tail] = bs_iter_objs
-
-                    #     cplex_times_g[tail] = cplex_iter_times
-                    #     cplex_objs_g[tail] = cplex_iter_objs
 
                     def get_indices(algo, iter_objs, common, common_2):
 
@@ -498,29 +439,6 @@ def graph_comparison():
 
                         return ind
 
-                    # if data_dic['solver_infeas'] < 1e-6:
-
-                    #     order = [min(nr_iter_objs), min(bs_iter_objs), cplex_obj]
-                    #     order = np.array(order)
-
-                    #     common = max(order)
-                    #     common_ind = np.argmax(order)
-
-                    #     order = np.delete(order, common_ind)
-                    #     common_2 = max(order)
-
-                    #     nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
-                    #     bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
-                    #     cp_i = find_indices(
-                    #         cplex_iter_objs, 'cplex', common, common_2)
-
-                    # else:
-                    #     common = max(min(nr_iter_objs), min(bs_iter_objs))
-
-                    #     nr_i = find_indices(nr_iter_objs, 'nr', common, common_2)
-                    #     bs_i = find_indices(bs_iter_objs, 'bs', common, common_2)
-                    #     cp_i = find_indices(
-                    #         cplex_iter_objs, 'cplex', common, common_2)
 
                     if cplex_iter_objs[0] > cplex_iter_objs[1]:
                         common = min(min(nr_iter_objs), min(bs_iter_objs))
@@ -599,60 +517,6 @@ def graph_comparison():
         save_fig('comparison_' + base.lower())
         plt.clf()
 
-    plt.figure(figsize=(16, 8))
-    i = 0
-    # GOTO INFEASIBILITY
-    infeasiblity_tails = ['e']
-    for tail in infeasiblity_tails:
-
-        i += 1
-        figure_grid = 120
-        plt.subplot(figure_grid + i)
-
-        # best_known = min(nr_objs_g[tail][nrmin], bs_objs_g[tail][bsmin])
-        best_known = min(min(nr_objs_g[tail]), min(bs_objs_g[tail]))
-
-        nrmin = np.argmin(nr_objs_g[tail])
-        bsmin = np.argmin(bs_objs_g[tail])
-
-        nr_objs_g[tail] = nr_objs_g[tail][:nrmin + 1]
-        nr_times_g[tail] = nr_times_g[tail][:nrmin + 1]
-
-        bs_objs_g[tail] = bs_objs_g[tail][:bsmin + 1]
-        bs_times_g[tail] = bs_times_g[tail][:bsmin + 1]
-
-        nr_objs_g[tail] = np.array(nr_objs_g[tail])
-        bs_objs_g[tail] = np.array(bs_objs_g[tail])
-        cplex_objs_g[tail] = np.array(cplex_objs_g[tail])
-
-        nr_objs_g[tail] -= best_known
-        bs_objs_g[tail] -= best_known
-        cplex_objs_g[tail] -= best_known
-
-        nr_objs_g[tail] /= best_known
-        bs_objs_g[tail] /= best_known
-        cplex_objs_g[tail] /= best_known
-
-        plt.plot(nr_times_g[tail], nr_objs_g[tail], 'g:s', linewidth=1, label='NR')
-        plt.plot(bs_times_g[tail], bs_objs_g[tail],
-                 'r:^', linewidth=1, label='BSC')
-        # plt.plot(np.cumsum(cplex_times_g[tail]), abs(cplex_objs_g[tail]), 'b:o', linewidth=1, label='CPLEX')
-        plt.plot(cplex_times_g[tail], abs(cplex_objs_g[tail]),
-                 'b:o', linewidth=1, label='CPLEX')
-
-        plt.ylabel('Relative objective gap (logscale)', fontsize=12)
-        plt.yscale('log')
-        plt.ylim(bottom=1e-8)
-        plt.xlabel('Running time', fontsize=12)
-        # plt.axis([xs,xe,ys,ye])
-        family_name = 'GOTO' + '-' + 'SR' + '-13' + \
-            tail + '  (m=' + 'n' + r'$\sqrt{n}$' + ')'
-        plt.grid(True)
-        plt.title(family_name, fontsize=12)
-        plt.legend(loc='upper right', fontsize=10)
-
-    save_fig('infeasibility_' + 'sr')
-    plt.clf()
 
 def graph_lambar_experiments():
 
@@ -721,8 +585,6 @@ def graph_lambar_experiments():
                         cplex_iter_objs = data_dic['solver_primals']
                         cplex_iter_times = data_dic['solver_iter_times']
                         cplex_feasible = data_dic['solver_feasible']
-                        # cplex_iter_times_bk = data_dic['solver_iter_objs']
-                        # cplex_iter_times = [data_dic['solver_elapsed'] - sum(cplex_iter_times_bk)] + cplex_iter_times
 
                         cplex_iter_objs[-1] = cplex_obj
 
@@ -860,7 +722,6 @@ def graph_lambar_experiments():
                     color='#b7fe00', ecolor='#c6ccce', alpha=0.8, capsize=5, label='NR')
             
             
-
             # tap_means_scaled[i]/2
             for pind in r_nr:
                 
@@ -897,13 +758,15 @@ def graph_lambar_experiments():
             # plt.figtext(0.5, 0.01, txt, wrap=True,
             #             ha='center', va="bottom", fontsize=7)
             plt.legend(fontsize=24)
-        # plt.suptitle('Performance sensitivity to ' + r'$\lambda$')
             save_fig('varying_lambar_' + family_type.lower().replace('_',''), tight_layout=True)
             plt.clf()
 
-# graph_gap_levels()
-# graph_lambar_experiments()
-# graph_base_vs_reliable()
+
+
+#run analysis to get graphs
+graph_gap_levels()
+graph_lambar_experiments()
+graph_base_vs_reliable()
 graph_comparison()
 
 
