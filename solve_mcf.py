@@ -1,2250 +1,854 @@
-import numpy as np
-import networkx as nx
-import matplotlib.pyplot as plt
+from utils import *
 import pandas
-import time
-from MCF_DiGraph import *
-from MinCostFlowMV import *
-from MinCostFlowXi import *
 import random
-import os
 import itertools
-import pickle
 import copy
-import sys
-import itertools
-import logging
-from tabulate import tabulate
 import cProfile
 import pstats
-import scipy
-# import sys
-# sys.path.append('/usr/local/Cellar/graph-tool/2.27_1/lib/python3.7/site-packages/')
-# import graph_tool as gt
+from prettytable import PrettyTable
+import caffeine
+from cplex.callbacks import BarrierCallback
+import networkx as nx
+
+class MCF_DiGraph:
+
+    def __init__(self, lambar=0.7, residual=False):
+        self.nxg = nx.DiGraph()
+        self.lambar = lambar
+
+class TimeLimit_LoggingCallback(BarrierCallback):
+
+    def __call__(self):
+        self.duals.append(self.get_dual_objective_value())
+        self.primals.append(self.get_objective_value())
+        self.is_feasible.append(self.is_primal_feasible())
+        self.primal_infeas.append(self.get_primal_infeasibility())
+        timeused = self.get_time() - self.starttime
+        self.iter_times.append(timeused)
+
+        dual = self.get_dual_objective_value()
+        primal = self.get_objective_value()
 
 
-## Solvers
-import mosek.fusion as mf
-from mosek.fusion import Expr, Set, Domain, Var, ObjectiveSense, Matrix
-from cvxopt import matrix, solvers, spmatrix
-import cplex
-import cvxpy as cp
-import docplex
-from gurobipy import *
+class TimeLimitCallback(BarrierCallback):
 
-def load_data(filename):
+    def __call__(self):
 
-class Logger(object):
-    """
-    Creates a class that will both print and log any
-    output text. See https://stackoverflow.com/a/5916874
-    for original source code. Modified to add date and
-    time to end of file name.
-    """
-
-    def __init__(self, **kwargs):
-        num_nodes = kwargs['num_nodes']
-        pname = 'saved_runs/' + str(num_nodes) + '/' + experiment_name
-        lamBar = kwargs['lam_bar'] * kwargs['scale']
-        lamstr = str(lamBar)
-        lamstr = lamstr.replace(".", "-")
-        narcs = kwargs['num_arcs']
-        mu_top = kwargs['mu_top']
-        var_top = kwargs['var_top']
-        seed = kwargs['seed']
-        save_extension = lamstr + '_' + \
-            str(mu_top) + str(var_top) + '_' + str(narcs) + '_' + str(seed)
-        self.filename = pname + save_extension + '.txt'
-
-        if not os.path.exists(pname):
-            os.makedirs(pname)
-
-        self.log = open(self.filename, "w")
-
-    def write(self, message):
-        # self.terminal.write(message)
-        self.log.write(message)
-
-    def flush(self):
-        pass
-
-def save(list_to_save, item, num_nodes, experiment_name=''):
-
-    pname = 'saved_runs/' + str(num_nodes) + '/' + experiment_name
-    fname = pname + item + '.pickle'
-
-    if not os.path.exists(pname):
-        os.makedirs(pname)
-
-    with open(fname, 'wb') as f:
-        pickle.dump(list_to_save, f)
-
-def load(item, num_nodes, experiment_name=''):
-    pname = 'saved_runs/' + str(num_nodes) + '/' + experiment_name
-    fname = pname + item + '.pickle'
-
-    with open(fname, 'rb') as f:
-        item = pickle.load(f)
-    return item
-
-def solve_xi_mosek(G,lam):
-
-    cvx_time_st = time.time()
-    G.set_lambda(lam=lam)
-
-    m = G.nxg.number_of_edges()
-    n = G.nxg.number_of_nodes()
-
-    x_ = np.zeros(m)
-    mu = np.zeros(m)
-    var = np.zeros(m)
-    sigma = np.zeros(m)
-    cap = np.zeros(m)
-    d = np.zeros(n)
-    F = np.zeros((m,n))
-    A = np.zeros((n, m))
-
-    rows = []
-    cols = []
-    values = []
-    i = 0
-    arc_dict = {}
-    for u, v, e in G.nxg.edges(data=True):
-        mu[i] = e.get('mu', 0)
-        # sigma[i] = np.sqrt(e.get('var', 0))
-        var[i] = e.get('var', 0)
-        x_[i] = e.get('flow',0)
-        cap[i] = e.get('capacity', 0)
-        arc_dict[i] = (u, v)
-        # A[u-1, i] = 1
-        # A[v-1, i] = -1
-        # A[u, i] = 1
-        # A[v, i] = -1
-        # rows.append(u - 1)
-        rows.append(u)
-
-        cols.append(i)
-        values.append(1)
-        # rows.append(v - 1)
-        rows.append(v )
-
-        cols.append(i)
-        values.append(-1)
-        i += 1
-
-    i = 0
-    for node, dat in G.nxg.nodes(data=True):
-        d[i] = dat['demand']
-        i += 1
-
-        arc_data = {'Start':[], 'End':[]}
-
-    for u, v, e in G.nxg.edges(data=True):
-        arc_data['Start'].append(u)
-        arc_data['End'].append(v)
+        dual = self.get_dual_objective_value()
+        primal = self.get_objective_value()
+        rel_gap = abs(dual - primal) / abs(min(primal, dual))
+        if rel_gap < self.acceptablegap:
+            self.aborted = 1
+            self.abort()
 
 
-    x = model.variable("x", m)
-    model.constraint(x, Domain.lessThan(cap))
+def cvxpy_solve(G, cvxpy=False, fusion=False, run_name='.', acceptablegap=1e-8):
+    start = time.time()
 
-        # x_n = model.variable("x_n", m)
-        # decoy = model.variable("decoy", 1)
-        # decoy_2 = Var.vstack(decoy, x_n)
+    if fusion:
+        G.A_msk = mf.Matrix.sparse(G.n, G.m, G.rows, G.cols, G.values)
 
-    model.objective("myobj",
-                    ObjectiveSense.Minimize, Expr.dot(mu, x))
-        # model.constraint(Expr.sub(x_n, Expr.mulElm(sigma, x)),
-        #                  Domain.equalsTo(0.0))
-        # model.constraint(decoy_2, Domain.inQCone())
-    A = Matrix.sparse(n, m, rows, cols, values)
-    model.constraint(Expr.mul(A, x), Domain.equalsTo(0.0))
+        with mf.Model() as model:
+
+            x = model.variable("x", G.m, mf.Domain.greaterThan(0.0))
+            x_n = model.variable("x_n", G.m)
+            decoy = model.variable("decoy", 1)
+            decoy_2 = mf.Var.vstack(decoy, x_n)
+            model.objective("myobj",
+                            mf.ObjectiveSense.Minimize,
+                            mf.Expr.add(mf.Expr.dot(G.mu, x), mf.Expr.mul(lambar, decoy)))
+            model.constraint(mf.Expr.sub(x_n, mf.Expr.mulElm(np.sqrt(G.var), x)),
+                             mf.Domain.equalsTo(0.0))
+            model.constraint(x, mf.Domain.lessThan(G.cap))
+            model.constraint(decoy_2, mf.Domain.inQCone())
+            model.constraint(mf.Expr.sub(mf.Expr.mul(
+                G.A_msk, x), G.b), mf.Domain.equalsTo(0.0))
+
+            model.setSolverParam("intpntCoTolRelGap", 1.0e-8)
+            model.setSolverParam("intpntCoTolPfeas", 1.0e-8)
+            model.setSolverParam("intpntCoTolDfeas", 1.0e-8)
+            model.setSolverParam("intpntCoTolMuRed", 1.0e-8)
+            model.setSolverParam("intpntMaxIterations", 100000)
+
+            import logging
+            log_path = os.path.join(EXPERIMENT_PATH, 'mosek')
+            log_path = os.path.join(log_path, run_name)
+
+            logging = Logger(run_dir=log_path)
+            model.setLogHandler(logging)
+            model.setSolverParam("logIntpnt", 1000)
+            model.setSolverParam("log", 1000)
+            model.setSolverParam("logFile", 1000)
+            model.solve()
+
+            obj = model.primalObjValue()
+            x = x.level()
+            # mean_cost = G.mu.dot(x)
+            # var_cost = G.var.dot(x)
+            elapsed = time.time() - start
+            print(obj, elapsed)
+            pdb.set_trace()
+            return obj, elapsed, x, None
+
+    if cvxpy:
+        x = cp.Variable(G.m)
+        constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
+        objective = cp.Minimize(
+            G.mu.T * x + G.lambar * cp.norm(cp.multiply(np.sqrt(G.var), x), 2))
+        prob = cp.Problem(objective, constraints)
+
+        # result = prob.solve(solver=solver, verbose=True)  # gurobi mosek
+        # compare
+
+        result = prob.solve(solver='MOSEK', verbose=False, mosek_params={'MSK_IPAR_LOG_INTPNT': 2, 'MSK_DPAR_INTPNT_QO_TOL_REL_GAP': 1e-14, 'MSK_DPAR_INTPNT_CO_TOL_MU_RED': 1e-12,
+                                                                         'MSK_DPAR_INTPNT_CO_TOL_PFEAS': 1e-12, 'MSK_DPAR_INTPNT_CO_TOL_REL_GAP': 1e-12, 'MSK_DPAR_INTPNT_CO_TOL_INFEAS': 1e-12, 'MSK_IPAR_INTPNT_MAX_ITERATIONS': 10000})
+
+        cvx_soln = x.value
+        cvx_obj = objective.value
+
+        # print(prob.solver_stats.solve_time, prob.solver_stats.setup_time)
+        cvx_elapsed = prob.solver_stats.solve_time
+        elapsed = time.time() - start
+
+        return cvx_obj, elapsed, cvx_soln, None
+
+    else:
+
+        prob = cplex.Cplex()
+        cplex_cb = prob.register_callback(TimeLimit_LoggingCallback)
+        cplex_cb.acceptablegap = acceptablegap
+        cplex_cb.aborted = 0
+        cplex_cb.starttime = prob.get_time()
+
+        cplex_cb.duals = []
+        cplex_cb.primals = []
+        cplex_cb.is_feasible = []
+        cplex_cb.primal_infeas = []
+        cplex_cb.iter_times = []
+        cplex_cb.feasible_dual = []
+        cplex_cb.feasible_primal = []
+
+        x_names = ['x' + str(i) for i in range(G.m)]
+        lin_obj = G.mu
+        prob.variables.add(obj=lin_obj, lb=np.zeros(G.m),
+                           ub=G.cap, names=x_names)
+
+        prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
+        prob.linear_constraints.set_coefficients(zip(G.rows, G.cols, G.values))
+
+        prob.objective.set_sense(prob.objective.sense.minimize)
+
+        decoy_name = ['decoy']
+        decoyvar = prob.variables.add(obj=[G.lambar], lb=[0], names=decoy_name)
+
+        qc_names_prepped = decoy_name + x_names
+        qc_rhs_prepped = [-1.0]
+        qc_rhs_prepped.extend(G.var)
+
+        prob.quadratic_constraints.add(quad_expr=[qc_names_prepped,
+                                                  qc_names_prepped,
+                                                  qc_rhs_prepped],
+                                       sense='L',
+                                       rhs=0,
+                                       name='q1')
+        cplex_log = "cplex_log.txt"
+        prob.set_log_stream(cplex_log)
+        prob.set_error_stream(cplex_log)
+        prob.set_warning_stream(cplex_log)
+        prob.set_results_stream(cplex_log)
+        prob.parameters.barrier.display.set(2)
+        prob.parameters.barrier.qcpconvergetol.set(1e-12)
+        # prob.parameters.barrier.algorithm.set(2)
+        # prob.parameters.barrier.limits.corrections.set(100)
+
+        prob.solve()
+        sol = prob.solution
+
+        obj = prob.solution.get_objective_value()
+        soln = np.array(prob.solution.get_values())
+
+        m = prob.solution.quality_metric
+        max_x, max_infeas = prob.solution.get_float_quality(
+            [m.max_x, m.max_primal_infeasibility])
+
+        elapsed = time.time() - start
+        status = sol.status[sol.get_status()]
+        if status != 'optimal' and status != 'abort_user' and status != 'num_best':
+            pdb.set_trace()
+
+        cplex_cb.primals.append(obj)
+        cplex_cb.iter_times.append(elapsed)
+        feasible = prob.solution.is_primal_feasible()
+        return status, feasible, obj, elapsed, soln, max_infeas, cplex_cb.duals, cplex_cb.primals, cplex_cb.is_feasible, cplex_cb.primal_infeas, cplex_cb.iter_times, cplex_cb.feasible_dual, cplex_cb.feasible_primal
 
 
-    constraints = []
-    for i in range(m):
-        if abs(x_[i]) < 1e-9:
-            constraints.append(xi[i]==0)
-            # constraints.append(xi[i]<=cap[i])
+def cvxpy_solve_additive(G, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', bound_lam=False, cvxpy=False, acceptablegap=1e-6, callback=True):
 
-        elif x_[i]==cap[i]:
-            constraints.append(-x_[i]<=xi[i])
-            constraints.append(xi[i]<=0)
+    start = time.time()
+
+    if cvxpy:
+        start = time.time()
+        x = cp.Variable(G.m)
+        constraints = [0 <= x, x <= G.cap, G.A@x == G.b]
+        if lp:
+            objective = cp.Minimize(G.mu * x)
+
+        elif bound_lam:
+            objective = cp.Minimize(G.var * x**2)
+
         else:
-            constraints.append(-x_[i]<=xi[i])
-            constraints.append(xi[i]<=cap[i] - x_[i])
+            objective = cp.Minimize(G.mu.T * x + lam * G.var * x**2)
 
-    for i in range(n):
-        preds = []
-        succs = []
-        for key, vals in arc_dict.items():
-            if vals[0] == i:
-                preds.append(key)
-            if vals[1] == i:
-                succs.append(key)
+        prob = cp.Problem(objective, constraints)
 
-        constraint = sum(xi[p] for p in preds) - sum(xi[s] for s in succs) ==  0
-        constraints.append(constraint)
+        result = prob.solve(solver='MOSEK', verbose=False)
+        cvx_soln = x.value
+        cvx_obj = objective.value
 
+        cvx_elapsed = prob.solver_stats.solve_time
+        elapsed = time.time() - start
 
-    # Construct the problem.
-    objective = cp.Minimize(G.lam*var.T*xi**2 + 2*np.multiply(var,x_).T*xi)
-    # print(sum(np.multiply(var,x_)))
-    # print(sum(x_))
-    prob = cp.Problem(objective, constraints)
-    cvx_time_st = time.time()
+        return cvx_obj, elapsed, cvx_soln, None, None
 
-    result = prob.solve(solver='MOSEK',verbose=False)
-    print("status:", prob.status)
-
-    cvx_soln = xi.value
-    cvx_obj = objective.value
-    cvx_elapsed = time.time() - cvx_time_st
-    print(cvx_elapsed)
-    # cost = 0
-    # for u,v,e in self.nxg.edges(data=True):
-    #     cost += e.get('xi', 0) * e.get('var', 0) * e.get('flow', 0)
-    # return cost
-
-    return cvx_soln, np.multiply(var, x_).dot(cvx_soln)
-
-def mosek_solve_lin(**kwargs):
-
-    if kwargs['G'] != None:
-        G = copy.deepcopy(kwargs['G'])
     else:
-        G = create_random_graph(**kwargs)
-    lam_bar = kwargs['lam_bar']
 
-    G.set_lambda(lam=lam_bar)
-    cvx_time_st = time.time()
+        if not warm_start:
+            prob = cplex.Cplex()
+            if lp:
+                if bound_lam:
+                    obj = np.sqrt(G.var)
+                else:
+                    obj = (G.mu + lam)
+                prob.variables.add(obj=obj, lb=np.zeros(G.m), ub=G.cap)
+            else:
+                prob.variables.add(lb=np.zeros(G.m), ub=G.cap)
 
-    m = G.nxg.number_of_edges()
-    n = G.nxg.number_of_nodes()
+                if not bound_lam:
+                    prob.objective.set_linear([(int(i), j)
+                                               for i, j in zip(np.arange(G.m), G.mu)])
+                    var = lam * np.array(G.var) * 2.0
 
-    mu = np.zeros(m)
-    var = np.zeros(m)
-    sigma = np.zeros(m)
-    cap = np.zeros(m)
-    d = np.zeros(n)
-    F = np.zeros((m, n))
-    A = np.zeros((n, m))
+                else:
+                    var = np.array(G.var)
 
-    rows = []
-    cols = []
-    values = []
-    i = 0
-    arc_dict = {}
-    for u, v, e in G.nxg.edges(data=True):
-        mu[i] = e.get('mu', 0)
-        # sigma[i] = np.sqrt(e.get('var', 0))
-        var[i] = e.get('var', 0)
+                prob.objective.set_quadratic(var)
 
-        cap[i] = e.get('capacity', 0)
-        arc_dict[i] = (u, v)
-        # A[u-1, i] = 1
-        # A[v-1, i] = -1
-        # A[u, i] = 1
-        # A[v, i] = -1
-        # rows.append(u - 1)
-        rows.append(u)
+            prob.linear_constraints.add(rhs=G.b, senses='E' * G.n)
+            prob.linear_constraints.set_coefficients(
+                zip(G.rows, G.cols, G.values))
 
-        cols.append(i)
-        values.append(1)
-        # rows.append(v - 1)
-        rows.append(v )
+            prob.objective.set_sense(prob.objective.sense.minimize)
+            prob.set_log_stream(None)
+            prob.set_error_stream(None)
+            prob.set_warning_stream(None)
+            prob.set_results_stream(None)
+            prob.parameters.barrier.display.set(0)
 
-        cols.append(i)
-        values.append(-1)
-        i += 1
-    i = 0
-    for node, dat in G.nxg.nodes(data=True):
-        d[i] = dat['demand']
-        i += 1
+        else:
+            if lp:
+                if bound_lam:
+                    coef = G.var
+                else:
+                    coef = (G.mu + lam)
+                prob.objective.set_linear([(int(i), j)
+                                           for i, j in zip(np.arange(G.m), coef)])
+            else:
+                var = lam * np.array(G.var) * 2.0
+                prob.objective.set_quadratic(var)
 
-    with mf.Model() as model:
+        if callback:
+            timelim_cb = prob.register_callback(TimeLimitCallback)
+            timelim_cb.acceptablegap = acceptablegap
+            timelim_cb.aborted = 0
 
-        const_time = time.time()
+        prob.solve()
 
-        x = model.variable("x", m, Domain.greaterThan(0.0))
-        # x_n = model.variable("x_n", m)
-        # decoy = model.variable("decoy", 1)
-        # decoy_2 = Var.vstack(decoy, x_n)
+        obj = prob.solution.get_objective_value()
+        soln = np.array(prob.solution.get_values())
 
-        model.objective("myobj",
-                        ObjectiveSense.Minimize, Expr.dot(mu, x))
-        # model.constraint(Expr.sub(x_n, Expr.mulElm(sigma, x)),
-        #                  Domain.equalsTo(0.0))
-        model.constraint(x, Domain.lessThan(cap))
-        # model.constraint(decoy_2, Domain.inQCone())
-        A = Matrix.sparse(n, m, rows, cols, values)
-        model.constraint(Expr.sub(Expr.mul(A, x), d), Domain.equalsTo(0.0))
+        elapsed = time.time() - start
 
-        # if kwargs['max_iters'] == None:
-        # model.setSolverParam("intpntCoTolRelGap", 1.0e-10)
-        # model.setSolverParam("intpntCoTolPfeas", 1.0e-10)
-        # model.setSolverParam("intpntCoTolDfeas", 1.0e-10)
-        # model.setSolverParam("intpntCoTolMuRed", 1.0e-10)
-        # model.setSolverParam("intpntMaxIterations", 100000)
-        # else:
-        #     model.setSolverParam("intpntMaxIterations", kwargs['max_iters'])
+        m = prob.solution.quality_metric
+        max_x, max_infeas = prob.solution.get_float_quality(
+            [m.max_x, m.max_primal_infeasibility])
 
-        # import logging
-
-        # logging = Logger(**kwargs)
-        # model.setLogHandler(logging)
-
-        # model.setSolverParam("logIntpnt", 1000)
-        # model.setSolverParam("log", 1000)
-        # model.setSolverParam("logFile", 1000)
-
-        # tm = model.getSolverDoubleInfo("optimizerTime")
-        # om = model.getSolverDoubleInfo("intpntPrimalObj")
-        # it = model.getSolverIntInfo("intpntIter")
-        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
-        const_time = time.time() - const_time
-        solve_time = time.time()
-
-        model.solve()
-
-        solve_time = time.time() - solve_time
-        mosek_overhead = const_time
-        # tm = model.getSolverDoubleInfo("optimizerTime")
-        # om = model.getSolverDoubleInfo("intpntPrimalObj")
-        # it = model.getSolverIntInfo("intpntIter")
-        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
-        # pdb.set_trace()
-        # print(model.primalObjValue())
-        # print('const_time: ', const_time)
-        # print('total_time_elapsed: ', solve_time + const_time)
-        # print(model.getProblemStatus())
-
-        cvx_obj = model.primalObjValue()
-        # x = x.level()
-        # try:
-        #     i = 0
-        #     for u, v, e in G.nxg.edges(data=True):
-        #         cur_x = x[i]
-        #         if abs(round(cur_x, 4) - cur_x) <= 1e-8:
-        #             cur_x = round(cur_x, 4)
-        #         G.nxg[u][v]['flow'] = cur_x
-        #         x[i] = cur_x
-        #         i += 1
-
-        #     cur_r_dict = nx.to_dict_of_dicts(G.nxg)
-        #     cc = [v for v in cur_r_dict.keys()]
-        #     list_ofed = []
-        #     endnode = len(G.nxg.nodes())
-        #     for c in cc:
-        #         if endnode in cur_r_dict[c].keys():
-        #             list_ofed.append(c)
-
-        #     flows = []
-        #     for e in list_ofed:
-        #         flows.append(G.nxg[e][endnode]['flow'])
-        #     flows = sum(np.array(flows))
-        # except:
-        #     pass
-
-        # x = nx.get_edge_attributes(G.nxg, 'flow')
-        # cvx_obj = G.tot_cost()
-        cvx_elapsed = solve_time + const_time
+        return obj, elapsed, soln, prob, max_infeas
 
 
+def cvxpy_solve_xi(G, soln, lam, prob=None, warm_start=False, lp=False, solver='MOSEK', iters=0, cvxpy=False, acceptablegap=1e-3, callback=True):
 
-        # cvx_obj = model.primalObjValue()
-        # x = x.level()
-        # try:
-        #     i = 0
-        #     for u, v, e in G.nxg.edges(data=True):
-        #         cur_x = x[i]
-        #         if abs(round(cur_x, 4) - cur_x) <= 1e-8:
-        #             cur_x = round(cur_x, 4)
-        #         G.nxg[u][v]['flow'] = cur_x
-        #         x[i] = cur_x
-        #         i += 1
+    start = time.time()
+    trial = False
+    cvxpy = False
+    if cvxpy:
 
-            # cur_r_dict = nx.to_dict_of_dicts(G.nxg)
-            # cc = [v for v in cur_r_dict.keys()]
-            # list_ofed = []
-            # endnode = len(G.nxg.nodes())
-            # for c in cc:
-            #     if endnode in cur_r_dict[c].keys():
-            #         list_ofed.append(c)
+        # xi = cp.Variable(G.m)
+        # x_ = soln
+        # constraints = [G.A@xi == 0, -x_ <= xi, xi <= G.cap]
 
-            # flows = []
-            # for e in list_ofed:
-            #     flows.append(G.nxg[e][endnode]['flow'])
-            # flows = sum(np.array(flows))
-            # print('going to the last node: ', flows)
-        # except:
-        #     pass
+        # diff = x_ - G.cap
+        # x_zero = np.argwhere(abs(x_) < 1e-6).ravel().astype(int)
+        # x_nonzero = np.argwhere(x_ > 1e-6).ravel().astype(int)
+        # x_u = np.argwhere(abs(diff) < 1e-6).ravel().astype(int)
+        # x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
+        # diff_ = G.cap[x_btw] - x_[x_btw]
 
-        # var = G.var_cost()
-        # cvx_elapsed = solve_time + const_time
+        # # if len(x_zero) > 0:
+        # # constraints.append(xi[x_zero] == np.zeros(len(x_zero)))
 
-        return cvx_obj, cvx_elapsed, mosek_overhead, x.level(), mu.dot(x.level()), np.sqrt(var.dot(x.level()**2))
+        # if len(x_u) > 0:
+        #     constraints.append(xi[x_u] <= np.zeros(len(x_u)))
+        #     constraints.append(xi[x_u] >= -x_[x_u])
 
-def cal_cost(theta, X, y):
-    '''
+        # if len(x_btw) > 0:
+        #     constraints.append(xi[x_btw] <= diff_)
+        #     constraints.append(xi[x_btw] >= -x_[x_btw])
 
-    Calculates the cost for given X and Y. The following shows and example of a single dimensional X
-    theta = Vector of thetas
-    X     = Row of X's np.zeros((2,j))
-    y     = Actual y's np.zeros((2,1))
+        # objective = cp.Minimize(
+        #     G.lam * G.var.T * cp.square(xi) + 2 * np.multiply(G.var, x_).T * xi)
+        # prob = cp.Problem(objective, constraints)
 
-    where:
-        j is the no of features
-    '''
+        # result = prob.solve(solver='MOSEK', verbose=False)
+        # cvx_soln = xi.value
+        # cvx_obj = objective.value
 
-    m = len(y)
+        # cvx_elapsed = prob.solver_stats.solve_time
+        # elapsed = time.time() - start
+        # return elapsed, cvx_soln, None, None
+        import cvxpy as cp
+        x_zero = np.argwhere(abs(soln) < 1e-4).ravel().astype(int)
+        x_nonzero = np.argwhere(soln > 1e-4).ravel().astype(int)
+        diff = abs(np.array(soln) - np.array(G.cap)) / \
+            np.minimum(np.array(G.cap), np.array(soln)) * 100
+        x_u = np.argwhere(abs(diff) < 1e-2).ravel().astype(int)
+        x_btw = np.array(list(set(x_nonzero).difference(set(x_u)))).astype(int)
 
-    predictions = X.dot(theta)
-    cost = (1 / 2 * m) * np.sum(np.square(predictions - y))
-    return cost
+        xi = cp.Variable(len(x_btw))
+        x_ = soln
 
-def gurobipy_solve(**kwargs):
-    if kwargs['G'] != None:
-        G=copy.deepcopy(kwargs['G'])
+        Gcols = []
+        Grows = []
+        Gvals = []
+        construct_dict = {}
+        construct_count = 0
+        nodeset = []
+
+        for ell in x_btw:
+            (u, v) = G.arc_dict[ell]
+
+            Grows.append(u - 1)
+            Gcols.append(construct_count)
+            Gvals.append(1.0)
+            Grows.append(v - 1)
+            Gcols.append(construct_count)
+            Gvals.append(-1.0)
+            construct_count += 1
+            nodeset.append(u - 1)
+            nodeset.append(v - 1)
+
+        nodeset = list(set(nodeset))
+
+        nGrows = [nodeset.index(i) for i in Grows]
+        nGA = scipy.sparse.csc_matrix((Gvals, (nGrows, Gcols)))
+
+        constraints = [nGA@xi == 0, -np.inf <= xi, xi <= np.inf]
+
+        objective = cp.Minimize(
+            G.lam * G.var[x_btw].T * cp.square(xi) + 2 * np.multiply(G.var[x_btw], x_[x_btw]).T * xi)
+        prob = cp.Problem(objective, constraints)
+
+        result = prob.solve(solver='CPLEX', verbose=False)
+        cvx_soln = xi.value
+        cvx_obj = objective.value
+
+        cvx_elapsed = prob.solver_stats.solve_time
+        elapsed = time.time() - start
+
+        construct_soln = x_
+        construct_soln[x_btw] = cvx_soln
+        construct_soln[~x_btw] = 0
+
+        return elapsed, construct_soln, None, None
     else:
-        G=create_random_graph(**kwargs)
-    lam_bar=kwargs['lam_bar']
-    G.set_lambda(lam=lam_bar)
-
-    m=G.nxg.number_of_edges()
-    n=G.nxg.number_of_nodes()
-
-    mu=np.zeros(m)
-    sigma=np.zeros(m)
-    cap=np.zeros(m)
-    d=np.zeros(n)
-    F=np.zeros((m, n))
-
-    i=0
-    arc_dict={}
-    A=np.zeros((n, m))
-
-    for u, v, e in G.nxg.edges(data=True):
-        mu[i]=e.get('mu', 0)
-        sigma[i]=np.sqrt(e.get('var', 0))
-        cap[i]=e.get('capacity', 0)
-        arc_dict[i]=(u, v)
-        A[u - 1, i]=1
-        A[v - 1, i]=-1
-        i += 1
-
-
-    i=0
-    for node, dat in G.nxg.nodes(data=True):
-        d[i]=dat['demand']
-        i += 1
-    model=Model('gurobi')
-
-    # Create variables
-    
-    A = scipy.sparse.csc_matrix((values,(rows,cols)))
-
-
-    x=model.addVars(m, name="x")
-    x_n=model.addVars(m, name="x_n")
-    decoy=model.addVar()
-    expr2=lam_bar * decoy
-
-    # obj
-
-    mobj=sum(x[k] * mu[k] for k in range(len(x)))
-    model.setObjective((kwargs['mu_scalar'] * mobj + expr2)
-                       * kwargs['obj_scalar'], GRB.MINIMIZE)
-
-    # Arc capacity constraints
-    model.addConstrs((x[i] <= cap[i] for i in range(m)), "upper")
-    model.addConstrs((0 <= x[i] for i in range(m)), "lower")
-    model.addConstrs((x_n[i] == sigma[i] * x[i]
-                      for i in range(m)), "sigma_thing")
-    model.addConstr(decoy * decoy >=
-                    (sum(x_n[k] * x_n[k] for k in range(len(x_n)))))
-
-    constraint_time=time.time()
-
-    model.addMConstrs(A * x  == d)
-
-    const_time=time.time() - constraint_time
-
-    # Compute optimal solution
-    if kwargs['max_iters'] == None:
-        model.Params.BarQCPConvTol=1e-15
-        model.Params.BarIterLimit = 150
-        model.Params.BarConvTol=1e-15
-        model.Params.FeasibilityTol=1e-9
-    # else:
-    #     model.Params.BarQCPConvTol = 1e-9
-    #     model.Params.BarConvTol = 1e-9
-    #     model.Params.FeasibilityTol = 1e-9
-    #     model.Params.BarIterLimit = kwargs['max_iters']
-
-    model.Params.OutputFlag=False
-    cvx_time_st=time.time()
-    model.update()
-
-    model.optimize()
-
-    # Print solution
-    # print(model.status)
-    cvx_obj=round(model.ObjVal, kwargs['cutoff'])
-    cvx_elapsed=time.time() - cvx_time_st
-    return cvx_obj, cvx_elapsed, const_time
-
-def cvxpy_solve(**kwargs):
-    if kwargs['G'] != None:
-        G=copy.deepcopy(kwargs['G'])
-    else:
-        G=create_random_graph(**kwargs)
-    lam_bar=kwargs['lam_bar']
-    G.set_lambda(lam=lam_bar)
-
-    m=G.nxg.number_of_edges()
-    n=G.nxg.number_of_nodes()
-
-    mu=np.zeros(m)
-    sigma=np.zeros(m)
-    cap=np.zeros(m)
-    d=np.zeros(n)
-    F=np.zeros((m, n))
-    x=cp.Variable(m)
-    theta = cp.Variable(1)
-    # x_n=cp.Variable(m)
-    rows = []
-    values = []
-    cols = []
-    var = np.zeros(m)
-    pdb.set_trace()
-    i=0
-    arc_dict={}
-    for u, v, e in G.nxg.edges(data=True):
-        mu[i]=e.get('mu', 0)
-        sigma[i]=np.sqrt(e.get('var', 0))
-        var[i]=e.get('var', 0)
-
-        cap[i]=e.get('capacity', 0)
-        arc_dict[i]=(u, v)
-        # rows.append(u - 1)
-        rows.append(u)
-        cols.append(i)
-        values.append(1)
-        # rows.append(v - 1)
-        rows.append(v)
-        cols.append(i)
-        values.append(-1)
-        i += 1
-
-    i=0
-    for node, dat in G.nxg.nodes(data=True):
-        d[i]=dat['demand']
-        i += 1
-
-    pdb.set_trace()
-
-    A = scipy.sparse.csc_matrix((values,(rows,cols)))
-
-    constraints=[0 <= x, x <= cap, A@x==d]
-
-
-
-    # objective=cp.Minimize(
-        # (kwargs['mu_scalar'] * mu.T * x + lam_bar * cp.norm(x_n, 2)) * kwargs['obj_scalar'])
-    objective=cp.Minimize((kwargs['mu_scalar'] * mu.T * x + lam_bar * cp.norm(cp.multiply(sigma,x), 2)) * kwargs['obj_scalar'])
-    prob=cp.Problem(objective, constraints)
-
-    # print(objective.value)
-    cvx_time_st=time.time()
-    # 'SCS','ECOS','CVXOPT' - 'MOSEK', 'GUROBI', 'CPLEX'
-    result=prob.solve(solver='GUROBI', verbose=True) # gurobi mosek compare
-    print(objective.value)
-    prob.unpack_results(cvx.ECOS, solver_output)
-    # result = prob.solve(solver='GUROBI', verbose=True)
-    # result = prob.solve(solver='MOSEK', verbose=True, mosek_params={'MSK_DPAR_INTPNT_CO_TOL_REL_GAP':1e-20,'MSK_DPAR_INTPNT_CO_TOL_INFEAS':1e-30,'MSK_IPAR_INTPNT_MAX_ITERATIONS':1000})
-    cvx_soln=x.value
-    cvx_obj=objective.value
-    cvx_elapsed=time.time() - cvx_time_st
-    print(prob.solver_stats.solve_time, prob.solver_stats.setup_time)
-    pdb.set_trace()
-    cvx_elapsed=prob.solver_stats.solve_time
-    cplex_params={"mip.tolerances.absmipgap": 1e-07, 
-                         "benders.strategy": 3}
-    return cvx_obj, cvx_elapsed, cvx_soln
-
-def mosek_solve(**kwargs):
-
-    if kwargs['G'] != None:
-        G = copy.deepcopy(kwargs['G'])
-    else:
-        G = create_random_graph(**kwargs)
-    lam_bar = kwargs['lam_bar']
-
-    G.set_lambda(lam=lam_bar)
-    cvx_time_st = time.time()
-
-    m = G.nxg.number_of_edges()
-    n = G.nxg.number_of_nodes()
-
-    mu = np.zeros(m)
-    sigma = np.zeros(m)
-    cap = np.zeros(m)
-    d = np.zeros(n)
-    F = np.zeros((m, n))
-    A = np.zeros((n, m))
-
-    rows = []
-    cols = []
-    values = []
-    i = 0
-    arc_dict = {}
-    for u, v, e in G.nxg.edges(data=True):
-        mu[i] = e.get('mu', 0)
-        sigma[i] = np.sqrt(e.get('var', 0))
-        cap[i] = e.get('capacity', 0)
-        arc_dict[i] = (u, v)
-        # rows.append(u - 1)
-        rows.append(u)
-        cols.append(i)
-        values.append(1)
-        # rows.append(v - 1)
-        rows.append(v)
-        cols.append(i)
-        values.append(-1)
-        i += 1
-
-    i = 0
-    for node, dat in G.nxg.nodes(data=True):
-        d[i] = dat['demand']
-        i += 1
-
-    with mf.Model() as model:
-
-        const_time = time.time()
-
-        x = model.variable("x", m, Domain.greaterThan(0.0))
-        x_n = model.variable("x_n", m)
-        decoy = model.variable("decoy", 1)
-        decoy_2 = Var.vstack(decoy, x_n)
-
-        model.objective("myobj",
-                        ObjectiveSense.Minimize,
-                        Expr.mul(kwargs['obj_scalar'],
-                                 Expr.add(Expr.mul(kwargs['mu_scalar'], Expr.dot(mu, x)), Expr.mul(lam_bar, decoy))))
-        model.constraint(Expr.sub(x_n, Expr.mulElm(sigma, x)),
-                         Domain.equalsTo(0.0))
-        model.constraint(x, Domain.lessThan(cap))
-        model.constraint(decoy_2, Domain.inQCone())
-        A = Matrix.sparse(n, m, rows, cols, values)
-        model.constraint(Expr.sub(Expr.mul(A, x), d), Domain.equalsTo(0.0))
-
-        # if kwargs['max_iters'] == None:
-        model.setSolverParam("intpntCoTolRelGap", 1.0e-9)
-        model.setSolverParam("intpntCoTolPfeas", 1.0e-9)
-        model.setSolverParam("intpntCoTolDfeas", 1.0e-9)
-        model.setSolverParam("intpntCoTolMuRed", 1.0e-9)
-        model.setSolverParam("intpntMaxIterations", 100000)
-        # else:
-        #     model.setSolverParam("intpntMaxIterations", kwargs['max_iters'])
-
-        import logging
-
-        logging = Logger(**kwargs)
-        model.setLogHandler(logging)
-
-        model.setSolverParam("logIntpnt", 1000)
-        model.setSolverParam("log", 1000)
-        model.setSolverParam("logFile", 1000)
-
-        # tm = model.getSolverDoubleInfo("optimizerTime")
-        # om = model.getSolverDoubleInfo("intpntPrimalObj")
-        # it = model.getSolverIntInfo("intpntIter")
-        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
-        const_time = time.time() - const_time
-        solve_time = time.time()
-
-        model.solve()
-
-        solve_time = time.time() - solve_time
-        mosek_overhead = const_time
-        # tm = model.getSolverDoubleInfo("optimizerTime")
-        # om = model.getSolverDoubleInfo("intpntPrimalObj")
-        # it = model.getSolverIntInfo("intpntIter")
-        # print('Time: {0}\nIterations: {1}\nObjective {2}'.format(tm, it, om))
-        # pdb.set_trace()
-        # print(model.primalObjValue())
-        # print('const_time: ', const_time)
-        # print('total_time_elapsed: ', solve_time + const_time)
-        # print(model.getProblemStatus())
-
-        cvx_obj = model.primalObjValue()
-        x = x.level()
-        # pdb.set_trace()
-        # try:
-        #     i = 0
-        #     for u, v, e in G.nxg.edges(data=True):
-        #         cur_x = x[i]
-        #         if abs(round(cur_x, 4) - cur_x) <= 1e-8:
-        #             cur_x = round(cur_x, 4)
-        #         G.nxg[u][v]['flow'] = cur_x
-        #         x[i] = cur_x
-        #         i += 1
-
-        #     cur_r_dict = nx.to_dict_of_dicts(G.nxg)
-        #     cc = [v for v in cur_r_dict.keys()]
-        #     list_ofed = []
-        #     endnode = len(G.nxg.nodes())
-        #     for c in cc:
-        #         if endnode in cur_r_dict[c].keys():
-        #             list_ofed.append(c)
-
-        #     flows = []
-        #     for e in list_ofed:
-        #         flows.append(G.nxg[e][endnode]['flow'])
-        #     flows = sum(np.array(flows))
-        # except:
-        #     pass
-
-        # x = nx.get_edge_attributes(G.nxg, 'flow')
-        # cvx_obj = G.tot_cost()
-        cvx_elapsed = solve_time + const_time
-
-        return cvx_obj, cvx_elapsed, mosek_overhead, x, mu.dot(x), decoy.level()[0]
-
-
-def create_random_graph_uncap(**kwargs):
-    """
-    Generates random graph with the given network parameters
-    """
-    seed = kwargs['seed']
-    num_nodes = kwargs['num_nodes']
-    mu_top = kwargs['mu_top']
-    var_top = kwargs['var_top'] * kwargs['var_scalar']
-    d_top = kwargs['d_top']
-    arcs = kwargs['num_arcs']
-    arc_pnode = int(arcs / num_nodes)
-
-    # fix random seed for reproducibility
-    np.random.seed(seed)
-    random.seed(seed)
-    G = MCF_DiGraph(kwargs['lam_bar'])
-
-    nodes = np.arange(num_nodes) + 1
-    nnodes = len(nodes)
-
-    # that a feasible flow exists
-    for node in nodes:
-        if node != len(nodes):
-            G.nxg.add_edge(node, node + 1, capacity=np.inf,
-                           mu=mu_top, var=var_top)
-    max_node = nodes[-1]
-    # add additional arcs, and assign capacity, mean, variance - by sampling
-    # from a U[0, max_param_value]
-    while np.array(list(dict(G.nxg.out_degree(nodes)).values())).mean() <= arc_pnode:
-        d = round(np.random.uniform(0, d_top), 2)
-        mu = round(np.random.uniform(0, mu_top), 4)
-        var = round(np.random.uniform(0, var_top), 4)
-        src = np.random.randint(1, max_node - 1)
-        dest_list = np.arange(max_node) + 1
-        dest_list = np.delete(dest_list, src - 1)
-        dest = random.choice(dest_list)
-        if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)):
-            G.nxg.add_edge(src, dest, capacity=np.inf, mu=mu, var=var)
-
-    # set supply demand at the nodes
-    G.nxg.node[1]['demand'] = d_top
-    G.nxg.node[len(nodes)]['demand'] = -d_top
-    for i in range(2, len(nodes)):
-        G.nxg.node[i]['demand'] = 0
-
-    G.find_feasible_flow()
-    G.set_weight_uc(kwargs['lam_bar'])
-    return G
-
-def read_and_create_graph(**kwargs):
-    mu_top = kwargs['mu_top']
-    var_top = kwargs['var_top'] * kwargs['var_scalar']
-    d_top = kwargs['d_top']
-    G = MCF_DiGraph(kwargs['lam_bar'])
-    G.nxg = nx.DiGraph()
-
-    df = pandas.read_csv('austin_net.csv')
-
-    for index, row in df.iterrows():
-        
-        init = row['Init_Node']
-        term = row['Term_Node']
-        e = (init, term)
-        cov_coef = np.random.uniform(0.15, 0.3)
-        mu = row['Free_Flow_Time']*60
-        std = mu*cov_coef
-        var = std**2
-        var = round(var, 4)
-        mu = round(mu, 4)
-        # cap = np.random.uniform(d_top/2, d_top)
-        cap = d_top
-
-        # if (not G.nxg.has_edge(init, term)) and (not G.nxg.has_edge(term, init)) and (init != term):
-        # if init ==1 or term==6661:
-            # cap = d_top
-
-        G.nxg.add_edge(*e, capacity=cap , mu=mu , var=var)
-
-    nodes = list(G.nxg.nodes())
-    
-    nx.set_node_attributes(G.nxg, 0, 'demand')
-    # pdb.set_trace()
-    G.nxg.node[1]['demand'] = d_top
-    G.nxg.node[6661]['demand'] = -d_top
-    # hopp = list(nx.all_simple_paths(G.nxg, 1, 6661))
-    # pdb.set_trace()
-
-    G.find_feasible_flow(d_top, mu_top, var_top)
-    return G
-
-def create_random_graph(**kwargs):
-
-    ###changes
-    """
-    Generates random graph with the given network parameters
-    """
-    seed = kwargs['seed']
-    num_nodes = kwargs['num_nodes']
-    mu_top = kwargs['mu_top']
-    var_top = kwargs['var_top'] * kwargs['var_scalar']
-    d_top = kwargs['d_top']
-    arcs = kwargs['num_arcs']
-    arc_pnode = int(arcs / num_nodes)
-
-    # fix random seed for reproducibility
-    np.random.seed(seed)
-    random.seed(seed)
-    G = MCF_DiGraph(kwargs['lam_bar'])
-
-    nodes = np.arange(num_nodes) + 1
-    nnodes = len(nodes)
-
-    all_nodes = np.arange(nnodes)[1:][:-1]
-    np.random.shuffle(all_nodes)
-    spath = np.insert(all_nodes, 0, 0)
-    spath = np.insert(spath, nnodes-1, nnodes-1)
-    G.nxg = nx.DiGraph()
-    G.nxg.add_path(spath)
-
-    for u,v,e in G.nxg.edges(data=True):
-        e['capacity']= d_top
-        e['mu'] =  mu_top
-        e['var'] = (mu_top*0.3)**2
-    # pdb.set_trace()
-    # for j in range(arcs):
-    extra = arcs - len(G.nxg.edges())
-
-    for j in range(extra):
-    # for src in G.nxg.nodes():
-    #     for j in range(arc_pnode - 1):
-        succ = False
-        mu = np.random.uniform(mu_top)
-        cov_coef = np.random.uniform(0.15, 0.3)
-        std = mu*cov_coef
-        var = std**2
-
-        src = np.random.randint(0, nnodes)
-
-        dest_list = np.arange(nnodes)
-        dest_list = np.delete(dest_list, src)
-
-        d = np.random.uniform(d_top*0.4, d_top)
-        # d=d_top
-
-        if src == 0:
-            dest_list = np.delete(dest_list, nnodes-2)
-        if src == nnodes-1:
-            dest_list = np.delete(dest_list, 0)
-
-        while not succ:
-            dest = random.choice(dest_list)
-            if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)) and (src != dest):
-                G.nxg.add_edge(src, dest, capacity=d, mu=mu, var=var)
-                succ = True
-
-    # for src in G.nxg.nodes():
-    #     while G.nxg.degree(src) -2 < arc_pnode:
-    #     # for j in range(arc_pnode):
-    #         succ = False
-    #         mu = np.random.uniform(mu_top)
-    #         cov_coef = np.random.uniform(0.15, 0.3)
-    #         std = mu*cov_coef
-    #         var = std**2
-    #         var = round(var, 4)
-
-    #         dest_list = np.arange(nnodes)
-    #         dest_list = np.delete(dest_list, src)
-
-    #         if src == 0:
-    #             dest_list = np.delete(dest_list, nnodes-2)
-    #         if src == nnodes-1:
-    #             dest_list = np.delete(dest_list, 0)
-
-    #         while not succ:
-    #             dest = random.choice(dest_list)
-    #             if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)) and (src != dest) and (G.nxg.degree(dest)-2 < arc_pnode):
-    #                 G.nxg.add_edge(src, dest, capacity=d_top, mu=mu, var=var)
-    #                 succ = True
-    print('num edges: ', len(G.nxg.edges()))
-
-    # while np.array(list(dict(G.nxg.degree(nodes)).values())).mean() -1 <= arc_pnode :
-
-    #     d = d_top
-    #     mu = np.random.uniform(mu_top)
-    #     cov_coef = np.random.uniform(0.15, 0.3)
-    #     std = mu*cov_coef
-    #     var = std**2
-    #     var = round(var, 4)
-
-    #     src = np.random.randint(0, nnodes)
-    #     dest = np.random.randint(0, nnodes)
-
-    #     dest_list = np.arange(nnodes)
-    #     dest_list = np.delete(dest_list, src)
-       
-    #     if src == 0:
-    #         dest_list = np.delete(dest_list, nnodes-2)
-    #     if src == nnodes-1:
-    #         dest_list = np.delete(dest_list, 0)
-
-    #     dest = random.choice(dest_list)
-
-    #     if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)) and (src != dest):
-    #         G.nxg.add_edge(src, dest, capacity=d, mu=mu, var=var)
-
-    # for src in G.nxg.nodes():
-    #     for j in range(arc_pnode):
-    #         succ = False
-    #         d = np.random.uniform(d_top)
-    #         mu = np.random.uniform(mu_top)
-    #         cov_coef = np.random.uniform(0.15, 0.3)
-    #         std = mu*cov_coef
-    #         var = std**2
-    #         var = round(var, 4)
-    #         # var = np.random.uniform(var_top)
-
-    #         dest_list = np.arange(nnodes)
-    #         dest_list = np.delete(dest_list, src)
-
-    #         if src == 0:
-    #             dest_list = np.delete(dest_list, nnodes-2)
-    #         if src == nnodes-1:
-    #             dest_list = np.delete(dest_list, 0)
-
-    #         while not succ:
-    #             dest = random.choice(dest_list)
-    #             if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)) and (src != dest):
-    #                 G.nxg.add_edge(src, dest, capacity=d_top, mu=mu, var=var)
-    #                 succ = True
-
-
-    G.nxg.node[0]['demand'] = d_top
-    G.nxg.node[nnodes-1]['demand'] = -d_top
-    for i in range(1, nnodes-1):
-        G.nxg.node[i]['demand'] = 0
-    G.init_node = 0
-    G.end_node = nnodes-1
-    G.find_feasible_flow(d_top, mu_top, var_top)
-
-
-
-
-    # gg = nx.connected_watts_strogatz_graph(100, 4*2, 1, tries=100, seed=None)
-    # can = list(nx.all_simple_paths(gg, 0, 99))
-    # pdb.set_trace()
-    
-    # gg = nx.connected_watts_strogatz_graph(num_nodes, arc_pnode*2, 0.2, tries=100, seed=None)
-    # print(list(gg.selfloop_edges()))
-    # print('edge number: ', len(gg.edges()))
-    # G.nxg = gg
-
-  
-
-    # for u,v,e in G.nxg.edges(data=True):
-    #     # if v-u != 1:
-    #     # for edge in G.nxg.edges():
-    #         # G.nxg.add_edge(src, dest, capacity=d, mu=mu, var=var)
-    #     # can = np.random.randint(1, 3)
-    #     # if can == 2 or can == 3:
-    #     #     # var = round(np.random.uniform(4,var_top), 4)
-    #     #     var = min(max(np.random.normal(var_top*0.9, var_top*0.2, 1)[0],2), var_top)
-    #     #     mu = min(max(np.random.normal(mu_top*0.9, mu_top*0.2, 1)[0],2), mu_top)
-    #     # else:
-    #     #     # var = round(np.random.uniform(var_top), 4)
-    #     #     mu = min(max(np.random.normal(mu_top*0.9, mu_top*0.2, 1)[0],2), mu_top)
-    #     #     var = min(max(np.random.normal(var_top*0.2, var_top*0.1, 1)[0],2), var_top)
-        
-    #     # d = min(max(np.random.normal(d_top, d_top*0.5,1)[0],0), d_top)
-    #     # d = d_top
-    #     d = np.random.uniform(d_top)
-    #     mu = np.random.uniform(mu_top)
-    #     var = np.random.uniform(var_top)
-
-    #     try:
-
-    #         if e['capacity'] == d_top:
-    #             print('hiii')
-    #             continue
-    #         else:
-    #             e['capacity']= d
-    #             e['mu'] =  mu
-    #             e['var'] = var
-    #     except:
-    #         e['capacity']= d
-    #         e['mu'] =  mu
-    #         e['var'] = var
-
-
-    # pdb.set_trace()
-
-
-    # for node in nodes:
-    #     if node != len(nodes):
-    #         mu = min(max(np.random.normal(mu_top/2, mu_top*0.33, 1)[0],2), mu_top)
-    #         var = min(max(np.random.normal(var_top/7, var_top*0.1, 1)[0],2), var_top)
-    #         d = min(max(np.random.normal(d_top/1.2, d_top*0.33,1)[0],0), d_top)
-    #         G.nxg.add_edge(node, node + 1, capacity=d,
-    #                        mu=mu, var=var)
-    # # edgeno = len(G.nxg.edges())
-    # max_node = nodes[-1]
-    # # print(edgeno)
-    # # add additional arcs, and assign capacity, mean, variance - by sampling
-    # # from a U[0, max_param_value]
-    # while np.array(list(dict(G.nxg.degree(nodes)).values())).mean() <= arc_pnode :
-    #     # d = round(np.random.uniform(d_top),4)
-    #     # d = round(np.random.uniform(d_top), 2)
-    #     # mu = round(np.random.uniform(4,mu_top), 4)
-    #     # mu = round(np.random.uniform(mu_top), 4)
-    #     # var = round(np.random.uniform(var_top), 4)
-
-    #     src = np.random.randint(1, max_node+1)
-    #     dest = np.random.randint(1, max_node+1)
-
-    #     diff = dest - src
-
-
-    #     can = np.random.randint(1, 3)
-    #     if can == 1:
-    #         # var = round(np.random.uniform(4,var_top), 4)
-    #         var = min(max(np.random.normal(var_top/2, var_top*0.33, 1)[0],2), var_top)
-    #         mu = min(max(np.random.normal(mu_top/7, mu_top*0.1, 1)[0],2), mu_top)
-    #     else:
-    #         # var = round(np.random.uniform(var_top), 4)
-    #         mu = min(max(np.random.normal(mu_top/2, mu_top*0.33, 1)[0],2), mu_top)
-    #         var = min(max(np.random.normal(var_top/7, var_top*0.1, 1)[0],2), var_top)
-        
-    #     d = min(max(np.random.normal(d_top/1.2, d_top*0.2,1)[0],0), d_top)
-
-    #     # print(d, mu, var)
-
-
-    #     # dest_list = np.arange(max_node) + 1
-    #     # # dest_list = np.delete(dest_list, src - 1)
-    #     # dest = random.choice(dest_list)
-    #     # if dest-src == 1:
-    #     #     G.nxg.add_edge(src, dest, capacity=d, mu=mu, var=var)
-    #     # else:  
-    #     if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)) and (src != dest):
-    #         G.nxg.add_edge(src, dest, capacity=d, mu=mu, var=var)
-
-    # # pdb.set_trace()
-    # # while nx.is_strongly_connected(G.nxg):
-    # #     arc_pnode +=1
-    # #     print(arc_pnode)
-    # #     while np.array(list(dict(G.nxg.out_degree(nodes)).values())).mean() <= arc_pnode :
-    # #         d = round(np.random.uniform(0, d_top), 2)
-    # #         mu = round(np.random.uniform(0, mu_top), 4)
-    # #         var = round(np.random.uniform(0, var_top), 4)
-    # #         src = np.random.randint(1, max_node - 1)
-    # #         dest_list = np.arange(max_node) + 1
-    # #         dest_list = np.delete(dest_list, src - 1)
-    # #         dest = random.choice(dest_list)
-    # #         if (not G.nxg.has_edge(src, dest)) and (not G.nxg.has_edge(dest, src)):
-    # #             G.nxg.add_edge(src, dest, capacity=d, mu=mu, var=var)
-    # pdb.set_trace()
-
-
-
-
-    # # set supply demand at the nodes
-    # # G.nxg.node[1]['demand'] = d_top
-    # G.nxg.node[0]['demand'] = d_top
-    # G.nxg.node[len(nodes)-1]['demand'] = -d_top
-    # # for i in range(2, len(nodes)):
-    # for i in range(1, len(nodes)-1):
-    # for i in range(1, len(nodes)-1):
-
-    #     # try:
-    #     G.nxg.node[i]['demand'] = 0
-    #     # except:
-    #     #     if (not G.nxg.has_edge(i-1, i)) and (not G.nxg.has_edge(i, i-1)):
-    #     #         G.nxg.add_edge(i-1, i, capacity=d_top,
-    #     #                        mu=mu_top*10000, var=var_top*10000)
-    #     #     if (not G.nxg.has_edge(i, i+1)) and (not G.nxg.has_edge(i+1, i)):
-    #     #         G.nxg.add_edge(i, i+1, capacity=d_top,
-    #     #                        mu=mu_top*10000, var=var_top*10000)
-    #     #     print('added decoy link')
-    #     #     G.nxg.node[i]['demand'] = 0
-    # G.init_node = 0
-    # G.end_node = nnodes-1
-
-
-    # G.find_feasible_flow()
-    # G.set_weight_uc(kwargs['lam_bar'])
-
-    # m = len(G.nxg.edges())
-    # n = len(G.nxg.nodes())
-    # f = open('10k_20k.tntp', 'w+')
-    # f.write('<NUMBER OF ZONES>' + str(n) + '\n')
-    # f.write('<NUMBER OF NODES>' + str(n) + '\n')
-    # f.write('<FIRST THRU NODE> 1 \n')
-    # f.write('<NUMBER OF LINKS>' + str(m) + '\n')
-
-    # f.write('<END OF METADATA>\n')
-    # f.write('~   Init node   Term node   Capacity    Length  Free Flow Time
-    # Alpha   Beta    Speed limit     Toll    Type    ;\n')
-
-    # nodelist = [n for n in G.nxg.nodes()]
-
-    # for u, v, e in G.nxg.edges(data=True):
-    #     try:
-    #         curvar = G.nxg[u][v]['var']
-    #         w = 2 * curvar * G.nxg[u][v]['flow'] + \
-    #             2 * G.lam * G.nxg[u][v]['xi'] * curvar
-    #         f.write(str(u) + '       ' + str(v) + '       ' +
-    #                 str(w) + '       ' + str(u) + '\n')
-    #     except:
-    #         curvar = G.nxg[v][u]['var']
-    #         w = 2 * curvar * G.nxg[v][u]['flow'] + \
-    #             2 * G.lam * G.nxg[v][u]['xi'] * curvar
-    #         w = w / 100.0
-    #         f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-    #                                                               * w) + '       ' + str(u) + '\n')
-
-    # f.write('@attributes\n')
-    # f.write('source ' + str(nodelist[0]) + '\n')
-    # f.write('target ' + str(nodelist[-1]) + '\n')
-    # f.close()
-
-    return G
-
-
-def solve_xi_mmc(G, R, xicost, discount=0, nmcc_tot_ms=0, scc_time=0, tol=1e-3, fully=False, nfullytol=1e-3, difftol=1e-5, xicostnoful=1e0, vartop=1e2):
-    prev_augment_amount = -1.0
-    nmcc_exists = True
-    iters = 0
-    consistent = False
-    consistent2 = False
-    consistent3 = False
-    here2 = -10
-    prev_xi_cost = 10
-    here = -10
-    while nmcc_exists:
-        iters += 1
-        st_write = time.time()
-        try:
-            os.remove('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt')
-        except:
-            pass
-        loc1 = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
-        loc2 = '/Users/cgokalp/repos/dev/msmcf/msmcf/residual_graph.lgf'
-
-        strconnected = True
-        # scc_time_start = time.time()
-        # try:
-        #     scc = max(nx.strongly_connected_components(G), key=len)
-        #     strconnected = False
-        # except:
-        #     pass
-        # scc_time += time.time() - scc_time_start
-
-        if not strconnected:
-            # scc_time_start = time.time()
-            # scc = [c for c in sorted(nx.strongly_connected_components(R.nxg),key=len, reverse=True)]
-            # scc_time += time.time() - scc_time_start
-            # scc_count = len(scc)
-            # maxim = -np.inf
-            # for i in range(scc_count):
-            #     lenlist = len(scc[i])
-            #     if lenlist >  maxim:
-            #         maxim = max(maxim, lenlist)
-            #         max_i = i
-            # nodelist = scc[max_i]
-            nodelist = scc
-            # pdb.set_trace()
-
-            cur_g = R.nxg.copy()
-            allnodes = np.arange(len(R.nxg.nodes)) + 1
-            removals = list(set(allnodes) - set(nodelist))
-            cur_g.remove_nodes_from(removals)
-
-            nodelist = [n for n in cur_g.nodes()]
-            f = open(loc1, 'w+')
-            f.write('@nodes\n')
-            f.write('label\n')
-            for node in nodelist:
-                f.write(str(node) + '\n')
-            f.write('@arcs\n')
-            f.write('                weight       label\n')
-            for u, v, e in cur_g.edges(data=True):
-                try:
-                    curvar = G.nxg[u][v]['var']
-                    w = w / 100.0
-                    w = 2 * curvar * G.nxg[u][v]['flow'] + \
-                        2 * G.lam * G.nxg[u][v]['xi'] * curvar
-                    f.write(str(u) + '       ' + str(v) + '       ' +
-                            str(w) + '       ' + str(u) + '\n')
-                except:
-                    curvar = G.nxg[v][u]['var']
-                    w = 2 * curvar * G.nxg[v][u]['flow'] + \
-                        2 * G.lam * G.nxg[v][u]['xi'] * curvar
-                    w = w / 100.0
-                    f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                          * w) + '       ' + str(u) + '\n')
-
-            f.write('@attributes\n')
-            f.write('source ' + str(nodelist[0]) + '\n')
-            f.write('target ' + str(nodelist[-1]) + '\n')
-            f.close()
-            os.rename(loc1, loc2)
-
-            found = False
-            manual = False
-            while_start = time.time()
-            while not found:
-
-                try:
-                    try:
-
-                        f = open(
-                            '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt', 'r')
-                        found = True
-                    except:
-                        pass
-                except KeyboardInterrupt:
-                    manual = True
-                    found = True
-
-            if not manual:
-                nmcc = []
-                try:
-                    for line in f.readlines():
-                        if line.find('@time_spent') >= 0:
-                            nmcc_time_ms = float(
-                                line[line.find(':') + 1:]) * 1e-6
-                        else:
-                            nmcc.append(int(line))
-                except:
-                    pdb.set_trace()
-                try:
-                    nmcc.append(nmcc[0])
-                except:
-                    pass
-                resid_nodelist = nodelist
-                nmcc_decoy = []
-                for n in nmcc:
-                    nmcc_decoy.append(resid_nodelist[n])
-                nmcc = nmcc_decoy
+        if trial:
+            warm_start = False
+            diff = soln - G.cap
+            x_ = soln
+
+            x_zero = np.argwhere(abs(soln) < 1e-4).ravel().astype(int)
+            x_nonzero = np.argwhere(soln > 1e-4).ravel().astype(int)
+            diff = abs(np.array(soln) - np.array(G.cap)) / \
+                np.minimum(np.array(G.cap), np.array(soln)) * 100
+            x_u = np.argwhere(abs(diff) < 1e-2).ravel().astype(int)
+            x_btw = np.array(
+                list(set(x_nonzero).difference(set(x_u)))).astype(int)
+
+            diff_ = G.cap[x_btw] - x_[x_btw]
+
+            cols = np.r_[x_btw, x_btw]
+
+            rows = np.arange(len(cols))
+            if not warm_start:
+
+                prob = cplex.Cplex()
+                if lp:
+                    obj = np.ones(len(x_btw))
+                    prob.variables.add(obj=obj, lb=-x_[x_btw], ub=diff_)
+                else:
+                    # prob.variables.add(lb=-x_[x_btw], ub=diff_)
+                    prob.variables.add(
+                        lb=-np.inf * np.ones(len(x_btw)), ub=np.inf * np.ones(len(x_btw)))
+
+                    lin_coeffs = 2 * G.var[x_btw] * x_[x_btw]
+                    quad_coeffs = lam * G.var[x_btw] * 2
+                    prob.objective.set_linear(
+                        [(int(i), j) for i, j in zip(np.arange(len(x_btw)), lin_coeffs)])
+                    prob.objective.set_quadratic(quad_coeffs)
+
+                Gcols = []
+                Grows = []
+                Gvals = []
+                construct_dict = {}
+                construct_count = 0
+                nodeset = []
+
+                for ell in x_btw:
+                    (u, v) = G.arc_dict[ell]
+
+                    Grows.append(u - 1)
+                    Gcols.append(construct_count)
+                    Gvals.append(1.0)
+                    Grows.append(v - 1)
+                    Gcols.append(construct_count)
+                    Gvals.append(-1.0)
+                    construct_count += 1
+                    nodeset.append(u - 1)
+                    nodeset.append(v - 1)
+
+                nodeset = list(set(nodeset))
+
+                nGrows = [nodeset.index(i) for i in Grows]
+
+                prob.linear_constraints.add(rhs=np.zeros(
+                    len(nodeset)), senses='E' * len(nodeset))
+                prob.linear_constraints.set_coefficients(
+                    zip(nGrows, Gcols, Gvals))
+
+                prob.objective.set_sense(prob.objective.sense.minimize)
+                prob.set_log_stream(None)
+                prob.set_error_stream(None)
+                prob.set_warning_stream(None)
+                prob.set_results_stream(None)
+                prob.parameters.barrier.display.set(0)
+
+        else:
+            diff = soln - G.cap
+            x_ = soln
+            x_zero = np.argwhere(abs(soln) < 1e-5).ravel().astype(int)
+            x_nonzero = np.argwhere(soln > 1e-5).ravel().astype(int)
+            x_u = np.argwhere(abs(diff) < 1e-5).ravel().astype(int)
+            x_btw = np.array(
+                list(set(x_nonzero).difference(set(x_u)))).astype(int)
+
+            diff_ = G.cap[x_btw] - x_[x_btw]
+
+            b = np.r_[np.zeros(len(x_zero)), np.zeros(
+                len(x_u))]
+
+            # cols = np.r_[x_zero, x_u]
+            # senses = np.r_[['E'] * len(x_zero), ['E'] * len(x_u)]
+
+            # rows = np.arange(len(cols))
+            # values = np.ones(len(rows))
+
+            if not warm_start:
+
+                prob = cplex.Cplex()
+                if lp:
+                    obj = np.ones(G.m)
+                    prob.variables.add(obj=obj, lb=-x_ *
+                                       np.ones(G.m), ub=G.cap)
+                else:
+                    # prob.variables.add(lb=-np.inf * np.ones(G.m), ub=G.cap)
+                    prob.variables.add(
+                        lb=-np.inf * np.ones(G.m), ub=np.inf * np.ones(G.m))
+
+                    lin_coeffs = 2 * G.var * x_
+                    quad_coeffs = lam * G.var * 2
+                    prob.objective.set_linear(
+                        [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
+                    if lam != 0:
+                        prob.objective.set_quadratic(quad_coeffs)
+
+                prob.linear_constraints.add(
+                    rhs=np.zeros(G.n), senses='E' * G.n)
+                prob.linear_constraints.set_coefficients(
+                    zip(G.rows, G.cols, G.values))
+
+                prob.variables.set_lower_bounds(
+                    zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+                prob.variables.set_upper_bounds(
+                    zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+
+                # prob.linear_constraints.add(rhs=b, senses=senses)
+                # prob.linear_constraints.set_coefficients(
+                #     zip(rows.astype(int), cols.astype(int), values))
+                # prob.linear_constraints.set_coefficients(
+                # zip([int(i) for i in rows], [int(i) for i in cols], values))
+
+                prob.objective.set_sense(prob.objective.sense.minimize)
+                prob.set_log_stream(None)
+                prob.set_error_stream(None)
+                prob.set_warning_stream(None)
+                prob.set_results_stream(None)
+                prob.parameters.barrier.display.set(0)
             else:
 
-                R.DG_2_dict(G)
-                if R.nmcc_exists:
-                    R.set_nmcc(G)
-                    nmcc = R.get_nmcc()
-                else:
-                    nmcc = []
+                prob.variables.set_lower_bounds(
+                    zip([int(i) for i in range(G.m)], np.ones(G.m) * (-np.inf)))
+                prob.variables.set_upper_bounds(
+                    zip([int(i) for i in range(G.m)], np.ones(G.m) * (np.inf)))
+
+                prob.variables.set_lower_bounds(
+                    zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+                prob.variables.set_upper_bounds(
+                    zip([int(i) for i in x_btw], np.zeros(len(x_btw))))
+
+                # prob.linear_constraints.delete(
+                #     G.n, prob.linear_constraints.get_num() - 1)
+                # prob.linear_constraints.add(rhs=b, names=names, senses=senses)
+                # prob.linear_constraints.set_coefficients(
+                #     zip(rows.astype(int), cols.astype(int), values))
+
+                if not lp:
+                    lin_coeffs = 2 * G.var * x_
+                    quad_coeffs = lam * G.var * 2
+                    prob.objective.set_linear(
+                        [(int(i), j) for i, j in zip(np.arange(G.m), lin_coeffs)])
+                    prob.objective.set_quadratic(quad_coeffs)
+
+        if callback:
+            timelim_cb = prob.register_callback(TimeLimitCallback)
+            timelim_cb.acceptablegap = acceptablegap
+            timelim_cb.aborted = 0
+        # pdb.set_trace()
+        prob.solve()
+
+        obj = prob.solution.get_objective_value()
+        soln = np.array(prob.solution.get_values())
+        construct_soln = soln
+        # construct_soln = x_
+        # construct_soln[x_btw] = soln
+        # construct_soln[~x_btw] = 0
+
+        elapsed = time.time() - start
+
+        m = prob.solution.quality_metric
+        max_x, max_infeas = prob.solution.get_float_quality(
+            [m.max_x, m.max_primal_infeasibility])
+
+        return elapsed, construct_soln, prob, max_infeas
+
+
+def bs_cvxpy(G, low=0, high=1000, prob=None, lp=False, solver_weird=False, cvxpy=False, solver_obj=None):
+    print('bsc')
 
-        else:
-            nodelist = [n for n in R.nxg.nodes()]
-            f = open(loc1, 'w+')
-            f.write('@nodes\n')
-            f.write('label\n')
-            for node in nodelist:
-                f.write(str(node) + '\n')
-            f.write('@arcs\n')
-            f.write('                weight       label\n')
-
-            for u, v, e in R.nxg.edges(data=True):
-                try:
-                    curvar = G.nxg[u][v]['var']
-                    w = 2 * curvar * G.nxg[u][v]['flow'] + \
-                        2 * G.lam * G.nxg[u][v]['xi'] * curvar
-                    w = w / 1e6
-                    f.write(str(u) + '       ' + str(v) + '       ' +
-                            str(w) + '       ' + str(u) + '\n')
-                except:
-                    curvar = G.nxg[v][u]['var']
-                    w = 2 * curvar * G.nxg[v][u]['flow'] + \
-                        2 * G.lam * G.nxg[v][u]['xi'] * curvar
-                    w = w / 1e6
-                    f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                          * w) + '       ' + str(u) + '\n')
-            f.write('@attributes\n')
-            f.write('source ' + str(nodelist[0]) + '\n')
-            f.write('target ' + str(nodelist[-1]) + '\n')
-            f.close()
-            os.rename(loc1, loc2)
-            ### fix
-
-            found = False
-            manual = False
-            while not found:
-                try:
-                    f = open('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt', 'r')
-                    found = True
-                except:
-                    pass
-
-            if not manual:
-                nmcc = []
-                try:
-                    i = 0
-                    for line in f.readlines():
-                        i += 1
-                        if i == 1:
-                            nmcc_cost = float(line.strip())
-                        else:
-                            if line.find('@time_spent') >= 0:
-                                nmcc_time_ms = float(
-                                    line[line.find(':') + 1:]) * 1e-6
-                            else:
-                                # nmcc.append(int(line) + 1)
-                                nmcc.append(nodelist[int(line)])
-
-                except:
-                    pdb.set_trace()
-                try:
-                    nmcc.append(nmcc[0])
-                except:
-                    pass
-
-        f.close()
-        try:
-            os.remove('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt')
-        except:
-            pass
-
-        if len(nmcc) < 3:
-            break
-        # if float(nmcc_cost)/vartop <= -1e-7 :
-        if float(nmcc_cost) >= 0 :
-            # print('nmcc cost is bigger than 0')
-            break
-
-        R.set_nmcc_lemon(nmcc)
-        G.set_nmcc_lemon(nmcc)
-        nmcc_tot_ms += nmcc_time_ms
-        discount += time.time() - st_write
-
-        delta = R.find_delta()
-        xsi_star = R.find_xsi_star_xi(G)
-        augment_amount = min(xsi_star, delta)
-        print(augment_amount)
-
-        # if fully:
-        # if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
-        if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
-
-
-            if not consistent:
-                here = iters
-                consistent = True
-            elif consistent and not consistent2:
-                if here == iters - 1:
-                    consistent2 = True
-                else:
-                    consistent = False
-            elif consistent and consistent2:
-                if here == iters - 2:
-                    print('xsi_star very small')
-                    break
-                else:
-                    consistent = False
-                    consistent2 = False
-        # # if xicost ==0:
-        # #     break
-        # if iters >= 20:
-        #     if iters%20==0:
-        #         xicost=G.xi_cost()
-        #         print('xicost: ', xicost)
-        #         if xicost == 0:
-        #             break
-        #         if abs(100*(prev_xi_cost/xicost -1)) < difftol:
-        #             if consistent3 == False:
-        #                 here2 = iters
-        #                 consistent3 = True
-        #             elif consistent3 == True and here2 == iters-20:
-        #                 break
-        #             else:
-        #                 consistent3 = False
-        #         prev_xi_cost = xicost
-
-        #     if iters%10==0:
-        #         xicost=G.xi_cost()
-        #         if abs(np.sqrt(prev_xicost) - np.sqrt(xicost)) < xicostnoful:
-        #             if consistent == False:
-        #                 here = iters
-        #                 consistent = True
-        #             elif consistent == True and here == iters-10:
-        #                 break
-        #             else:
-        #                 consistent = False
-        #         prev_xicost = xicost
-        #
-        #
-        # else:
-        #     if abs(augment_amount) < tol:
-        #         break
-        #     if iters%5==0:
-        #         xicost=G.xi_cost()
-        #         if abs(100*(np.array(prev_xicost)/(xicost) -1)) < 1e-1:
-        #
-        #         # if abs(np.sqrt(prev_xicost) - np.sqrt(xicost)) < xicostnoful:
-        #             if consistent == False:
-        #                 here = iters
-        #                 consistent = True
-        #             elif consistent == True and here == iters-5:
-        #                 break
-        #             else:
-        #                 consistent = False
-        #         prev_xicost = xicost
-
-        R.augment_flow(augment_amount)
-        G.adjust_flow_xi(nmcc, augment_amount)
-    # print('xi iters: ', iters)
-    xicost = G.xi_cost()
-    nmcc_time = nmcc_tot_ms * 0.001
-    return discount, nmcc_time, scc_time, xicost
-
-
-def solve_mcf_sa(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-6, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1, mutop=1e2):
-    prev_augment_amount = -1.0
-    nmcc_exists = True
-    iters = 0
-    consistent = False
-    consistent2 = False
-    consistent3 = False
-    here = -10
-    here2 = -10
-    prev_var_cost = 10
-
-    while nmcc_exists:
-        iters += 1
-        st_write = time.time()
-        try:
-            os.remove('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt')
-        except:
-            pass
-        loc1 = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
-        loc2 = '/Users/cgokalp/repos/dev/msmcf/msmcf/residual_graph.lgf'
-
-        strconnected = True
-
-        # scc_time_start = time.time()
-
-        # can=nx.is_strongly_connected(R.nxg)
-        # if not can:
-        # strconnected = False
-        # print('not connected')
-        # try:
-        #     scc = max(nx.strongly_connected_components(G), key=len)
-        #
-        # except:
-        #     pass
-        # scc_time += time.time() - scc_time_start
-
-        if not strconnected:
-            scc_time_start = time.time()
-            scc = [c for c in sorted(
-                nx.strongly_connected_components(R.nxg), key=len, reverse=True)]
-            scc_time += time.time() - scc_time_start
-            scc_count = len(scc)
-            maxim = -np.inf
-            for i in range(scc_count):
-                lenlist = len(scc[i])
-                if lenlist > maxim:
-                    maxim = max(maxim, lenlist)
-                    max_i = i
-            nodelist = scc[max_i]
-            cur_g = copy.deepcopy(R.nxg)
-            allnodes = np.arange(len(R.nxg.nodes)) + 1
-            removals = list(set(allnodes) - set(nodelist))
-            cur_g.remove_nodes_from(removals)
-
-            nodelist = [n for n in cur_g.nodes()]
-            f = open(loc1, 'w+')
-            f.write('@nodes\n')
-            f.write('label\n')
-            for node in nodelist:
-                f.write(str(node) + '\n')
-            f.write('@arcs\n')
-            f.write('                weight       label\n')
-            jj = 0
-            for u, v, e in cur_g.edges(data=True):
-                jj += 1
-                try:
-                    flow = G.nxg[u][v]['flow']
-                    w = G.mu_scalar * G.nxg[u][v]['mu'] + \
-                        2 * G.lam * flow * G.nxg[u][v]['var']
-                    f.write(str(u) + '       ' + str(v) + '       ' +
-                            str((1.0) * w) + '       ' + str(u) + '\n')
-                except:
-                    flow = G.nxg[v][u]['flow']
-                    w = G.mu_scalar * G.nxg[v][u]['mu'] + \
-                        2 * G.lam * flow * G.nxg[v][u]['var']
-                    f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                          * w) + '       ' + str(u) + '\n')
-            f.write('@attributes\n')
-            f.write('source ' + str(nodelist[0]) + '\n')
-            f.write('target ' + str(nodelist[-1]) + '\n')
-            f.close()
-            os.rename(loc1, loc2)
-
-            found = False
-            manual = False
-            while_start = time.time()
-            while not found:
-                try:
-                    f = open(
-                        '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt', 'r')
-                    found = True
-                except:
-                    pass
-
-            if not manual:
-                nmcc = []
-                try:
-                    i = 0
-                    for line in f.readlines():
-                        i += 1
-                        if i == 1:
-                            nmcc_cost = line.strip()
-                        else:
-                            if line.find('@time_spent') >= 0:
-                                nmcc_time_ms = float(
-                                    line[line.find(':') + 1:]) * 1e-6
-                            else:
-                                # nmcc.append(int(line) + 1)
-                                nmcc.append(int(line))
-                                # 
-                except:
-                    pdb.set_trace()
-
-                try:
-                    nmcc.append(nmcc[0])
-                except:
-                    pass
-
-        else:
-            nodelist = [n for n in R.nxg.nodes()]
-            f = open(loc1, 'w+')
-            f.write('@nodes\n')
-            f.write('label\n')
-            for node in nodelist:
-                f.write(str(node) + '\n')
-            f.write('@arcs\n')
-            f.write('                weight       label\n')
-            jj = 0
-            for u, v, e in R.nxg.edges(data=True):
-                jj += 1
-                try:
-                    flow = G.nxg[u][v]['flow']
-                    w = G.mu_scalar * G.nxg[u][v]['mu'] + \
-                        2 * G.lam * flow * G.nxg[u][v]['var']
-                    w = w / 1e6
-                    f.write(str(u) + '       ' + str(v) + '       ' +
-                            str((1.0) * w) + '       ' + str(u) + '\n')
-                except:
-                    flow = G.nxg[v][u]['flow']
-                    w = G.mu_scalar * G.nxg[v][u]['mu'] + \
-                        2 * G.lam * flow * G.nxg[v][u]['var']
-                    w = w / 1e6
-                    f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                          * w) + '       ' + str(u) + '\n')
-
-            f.write('@attributes\n')
-            f.write('source ' + str(nodelist[0]) + '\n')
-            f.write('target ' + str(nodelist[-1]) + '\n')
-            f.close()
-            os.rename(loc1, loc2)
-
-            found = False
-            manual = False
-            while not found:
-                try:
-                    f = open('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt', 'r')
-                    found = True
-                except:
-                    pass
-
-            if not manual:
-                nmcc = []
-                try:
-                    i = 0
-                    for line in f.readlines():
-                        i += 1
-                        if i == 1:
-                            nmcc_cost = line.strip()
-                        else:
-                            if line.find('@time_spent') >= 0:
-                                nmcc_time_ms = float(
-                                    line[line.find(':') + 1:]) * 1e-6
-                            else:
-                                # nmcc.append(int(line) + 1)
-                                nmcc.append(int(line))
-
-                except:
-                    pdb.set_trace()
-
-                try:
-                    nmcc.append(nmcc[0])
-                except:
-                    pass
-
-        f.close()
-        try:
-            os.remove('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt')
-        except:
-            pass
-
-        if len(nmcc) < 3:
-            print('len nmcc is 2')
-            break
-
-        divider = 10**(len(str(vartop))-1)
-
-        if float(nmcc_cost) >=  0:#*1e4/divider >= -1e-4:
-            # print('nmcc cost bigger than 0')
-            break
-
-        R.set_nmcc_lemon(nmcc)
-        G.set_nmcc_lemon(nmcc)
-        nmcc_tot_ms += nmcc_time_ms
-        discount += time.time() - st_write
-
-        delta = R.find_delta()
-        xsi_star = R.find_xsi_star(G)
-
-        augment_amount = min(xsi_star, delta)
-        # print(nmcc_cost, delta, xsi_star)
-        # if not lamsearch:
-        #     if fully:
-        # print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
-        #                 float(nmcc_cost), delta, xsi_star))
-
-        if abs(augment_amount) <= nfullytol and xsi_star <= nfullytol:
-            # print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
-            #             float(nmcc_cost), delta, xsi_star))
-
-            # if iters >= 10:
-            #     if iters %10 == 0:
-            if not consistent:
-                here = iters
-                consistent = True
-            elif consistent and not consistent2:
-                if here == iters - 1:
-                    consistent2 = True
-                else:
-                    consistent = False
-            elif consistent and consistent2:
-                if here == iters - 2:
-                    # print('xsi star is very small')
-                    # print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
-                    #     float(nmcc_cost), delta, xsi_star))
-                    break
-                else:
-                    consistent = False
-                    consistent2 = False
-        # if iters >= 20:
-        #     if iters%20==0:
-        #         varcost=G.var_cost()
-        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < difftol:
-        #             if consistent3 == False:
-        #                 here2 = iters
-        #                 consistent3 = True
-        #             elif consistent3 == True and here2 == iters-20:
-        #                 break
-        #             else:
-        #                 consistent3 = False
-        #         prev_var_cost = varcost
-        #         #
-        #
-        #     else:
-        #         if abs(augment_amount) <= tol:
-        #             # if consistent == False:
-        #                 # here = iters
-        #                 # consistent = True
-        #             # elif consistent == True and here == iters-1:
-        #             break
-        #             # else:
-        #                 # consistent = False
-        #
-        #
-        # if lamsearch:
-        #
-        #
-        #     # if abs(augment_amount) <= tol:
-        #     #     if consistent == False:
-        #     #         here = iters
-        #     #         consistent = True
-        #     #     elif consistent == True and here == iters-1:
-        #     #         break
-        #     #     else:
-        #     #         consistent = False
-        #             #
-        #     # if float(nmcc_cost) > -10:
-        #     #     break
-        #     if nr_run:
-        #         if abs(augment_amount) <= tol:
-        #             break
-        #
-        #     if iters%5==0:
-        #         varcost=G.var_cost()
-        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < 1e-1:
-        #
-        #         # if abs(np.sqrt(prev_var_cost) - np.sqrt(varcost)) < var_cost_noful_tol:
-        #             if consistent == False:
-        #                 here = iters
-        #                 consistent = True
-        #             elif consistent == True and here == iters-5:
-        #                 break
-        #             else:
-        #                 consistent = False
-        #         prev_var_cost = varcost
-        #
-        # # else:
-        # #     break
-
-        R.augment_flow(augment_amount)
-        G.adjust_flow(nmcc, augment_amount)
-
-    # print('iters: ', iters)
-    varcost = G.var_cost()
-    nmcc_time = nmcc_tot_ms * 0.001
-    return discount, nmcc_time, scc_time, varcost
-
-
-def solve_mcf_sa_lin(G, R, varcost=None, discount=0, nmcc_tot_ms=0, scc_time=0, difftol=1e-1, tol=1e-2, fully=False, nfullytol=5e-4, lamsearch=False, var_cost_noful_tol=5e0, var_cost_ful=5e0, nr_run=False, vartop=1e1, mutop=1e2):
-    prev_augment_amount = -1.0
-    nmcc_exists = True
-    iters = 0
-    consistent = False
-    consistent2 = False
-    consistent3 = False
-    here = -10
-    here2 = -10
-    prev_var_cost = 10
-
-    while nmcc_exists:
-        iters += 1
-        st_write = time.time()
-        try:
-            os.remove('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt')
-        except:
-            pass
-        loc1 = '/Users/cgokalp/repos/dev/msmcf/residual_graph.lgf'
-        loc2 = '/Users/cgokalp/repos/dev/msmcf/msmcf/residual_graph.lgf'
-
-        strconnected = True
-
-        # scc_time_start = time.time()
-
-        # can=nx.is_strongly_connected(R.nxg)
-        # if not can:
-        # strconnected = False
-        # print('not connected')
-        # try:
-        #     scc = max(nx.strongly_connected_components(G), key=len)
-        #
-        # except:
-        #     pass
-        # scc_time += time.time() - scc_time_start
-
-        if not strconnected:
-            scc_time_start = time.time()
-            scc = [c for c in sorted(
-                nx.strongly_connected_components(R.nxg), key=len, reverse=True)]
-            scc_time += time.time() - scc_time_start
-            scc_count = len(scc)
-            maxim = -np.inf
-            for i in range(scc_count):
-                lenlist = len(scc[i])
-                if lenlist > maxim:
-                    maxim = max(maxim, lenlist)
-                    max_i = i
-            nodelist = scc[max_i]
-            cur_g = copy.deepcopy(R.nxg)
-            allnodes = np.arange(len(R.nxg.nodes)) + 1
-            removals = list(set(allnodes) - set(nodelist))
-            cur_g.remove_nodes_from(removals)
-
-            nodelist = [n for n in cur_g.nodes()]
-            f = open(loc1, 'w+')
-            f.write('@nodes\n')
-            f.write('label\n')
-            for node in nodelist:
-                f.write(str(node) + '\n')
-            f.write('@arcs\n')
-            f.write('                weight       label\n')
-            jj = 0
-            for u, v, e in cur_g.edges(data=True):
-                jj += 1
-                try:
-                    flow = G.nxg[u][v]['flow']
-                    w = G.nxg[u][v]['mu']
-                    f.write(str(u) + '       ' + str(v) + '       ' +
-                            str((1.0) * w) + '       ' + str(u) + '\n')
-                except:
-                    flow = G.nxg[v][u]['flow']
-                    w = G.nxg[v][u]['mu']
-                    f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                          * w) + '       ' + str(u) + '\n')
-            f.write('@attributes\n')
-            f.write('source ' + str(nodelist[0]) + '\n')
-            f.write('target ' + str(nodelist[-1]) + '\n')
-            f.close()
-            os.rename(loc1, loc2)
-
-            found = False
-            manual = False
-            while_start = time.time()
-            while not found:
-                try:
-                    f = open(
-                        '/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt', 'r')
-                    found = True
-                except:
-                    pass
-
-            if not manual:
-                nmcc = []
-                try:
-                    i = 0
-                    for line in f.readlines():
-                        i += 1
-                        if i == 1:
-                            nmcc_cost = line.strip()
-                        else:
-                            if line.find('@time_spent') >= 0:
-                                nmcc_time_ms = float(
-                                    line[line.find(':') + 1:]) * 1e-6
-                            else:
-                                # nmcc.append(int(line) + 1)
-                                nmcc.append(int(line))
-
-                except:
-                    pdb.set_trace()
-
-                try:
-                    nmcc.append(nmcc[0])
-                except:
-                    pass
-
-        else:
-            nodelist = [n for n in R.nxg.nodes()]
-            f = open(loc1, 'w+')
-            f.write('@nodes\n')
-            f.write('label\n')
-            for node in nodelist:
-                f.write(str(node) + '\n')
-            f.write('@arcs\n')
-            f.write('                weight       label\n')
-            jj = 0
-            for u, v, e in R.nxg.edges(data=True):
-                jj += 1
-                try:
-                    flow = G.nxg[u][v]['flow']
-                    w = G.nxg[u][v]['mu']
-                    w = w / 1e6
-                    f.write(str(u) + '       ' + str(v) + '       ' +
-                            str((1.0) * w) + '       ' + str(u) + '\n')
-                except:
-                    flow = G.nxg[v][u]['flow']
-                    w = G.nxg[v][u]['mu']
-                    w = w / 1e6
-                    f.write(str(u) + '       ' + str(v) + '       ' + str((-1.0)
-                                                                          * w) + '       ' + str(u) + '\n')
-
-            f.write('@attributes\n')
-            f.write('source ' + str(nodelist[0]) + '\n')
-            f.write('target ' + str(nodelist[-1]) + '\n')
-            f.close()
-            os.rename(loc1, loc2)
-
-            found = False
-            manual = False
-            while not found:
-                try:
-                    f = open('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt', 'r')
-                    found = True
-                except:
-                    pass
-
-            if not manual:
-                nmcc = []
-                try:
-                    i = 0
-                    for line in f.readlines():
-                        i += 1
-                        if i == 1:
-                            nmcc_cost = line.strip()
-                        else:
-                            if line.find('@time_spent') >= 0:
-                                nmcc_time_ms = float(
-                                    line[line.find(':') + 1:]) * 1e-6
-                            else:
-                                # nmcc.append(int(line) + 1)
-                                nmcc.append(int(line))
-
-                except:
-                    pdb.set_trace()
-
-                try:
-                    nmcc.append(nmcc[0])
-                except:
-                    pass
-
-        f.close()
-        try:
-            os.remove('/Users/cgokalp/repos/dev/msmcf/msmcf/nmcc.txt')
-        except:
-            pass
-
-        if len(nmcc) < 3:
-            print('len nmcc is 2')
-            break
-
-        if float(nmcc_cost) >= 0:
-            print('nmcc cost bigger than 0')
-            break
-
-        R.set_nmcc_lemon(nmcc)
-        G.set_nmcc_lemon(nmcc)
-        nmcc_tot_ms += nmcc_time_ms
-        discount += time.time() - st_write
-
-        delta = R.find_delta()
-        # xsi_star = R.find_xsi_star(G)
-
-        augment_amount = delta
-        # if not lamsearch:
-        #     if fully:
-        if abs(augment_amount) <= nfullytol:
-
-            if not consistent:
-                here = iters
-                consistent = True
-            elif consistent and not consistent2:
-
-                if here == iters - 1:
-                    consistent2 = True
-                else:
-                    consistent = False
-            elif consistent and consistent2:
-
-                if here == iters - 2:
-                    print('xsi star is very small')
-                    print('nmcc_cost is: {}, delta is: {}, and xsi_star is: {}'.format(
-                        float(nmcc_cost), delta, xsi_star))
-
-                    break
-                else:
-                    consistent = False
-                    consistent2 = False
-
-                # if iters >= 20:
-                #     if iters%20==0:
-                #         varcost=G.var_cost()
-                #         print(varcost)
-                #         print(xsi_star)
-                #         print('diff: ', abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)))
-                #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < difftol:
-                #             if consistent3 == False:
-                #                 here2 = iters
-                #                 consistent3 = True
-                #             elif consistent3 == True and here2 == iters-20:
-                #                 break
-                #             else:
-                #                 consistent3 = False
-                #         prev_var_cost = varcost
-        #         #
-        #
-        #     else:
-        #         if abs(augment_amount) <= tol:
-        #             # if consistent == False:
-        #                 # here = iters
-        #                 # consistent = True
-        #             # elif consistent == True and here == iters-1:
-        #             break
-        #             # else:
-        #                 # consistent = False
-        #
-        #
-        # if lamsearch:
-        #
-        #
-        #     # if abs(augment_amount) <= tol:
-        #     #     if consistent == False:
-        #     #         here = iters
-        #     #         consistent = True
-        #     #     elif consistent == True and here == iters-1:
-        #     #         break
-        #     #     else:
-        #     #         consistent = False
-        #             #
-        #     # if float(nmcc_cost) > -10:
-        #     #     break
-        #     if nr_run:
-        #         if abs(augment_amount) <= tol:
-        #             break
-        #
-        #     if iters%5==0:
-        #         varcost=G.var_cost()
-        #         if abs(100*(np.array(np.sqrt(prev_var_cost))/np.sqrt(varcost) -1)) < 1e-1:
-        #
-        #         # if abs(np.sqrt(prev_var_cost) - np.sqrt(varcost)) < var_cost_noful_tol:
-        #             if consistent == False:
-        #                 here = iters
-        #                 consistent = True
-        #             elif consistent == True and here == iters-5:
-        #                 break
-        #             else:
-        #                 consistent = False
-        #         prev_var_cost = varcost
-        #
-        # # else:
-        # #     break
-
-        R.augment_flow(augment_amount)
-        G.adjust_flow(nmcc, augment_amount)
-
-    print('iters: ', iters)
-    varcost = G.var_cost()
-    nmcc_time = nmcc_tot_ms * 0.001
-    return discount, nmcc_time, scc_time, varcost
-
-
-def get_upper_bound(G, R, lam_bar, tol, muscalar, disc_tot=0, nmcc_tot=0):
-    lam_high = lam_bar
-    G.set_lambda(lam_high)
-    G.set_muscalar(muscalar)
     start = time.time()
-    varcost = 1e6
-    discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-        G, R, varcost, fully=False, tol=tol)
-    # solve_var(G, lam_high)
-    # discount, nmcc_time, scc_time = solve_mcf_sa(G, R, fully=True)
-    # discount, nmcc_time, scc_time = solve_mcf_sa(G, R)
 
-    disc_tot += discount
-    nmcc_tot += nmcc_time
-    sigma_lam = np.sqrt(varcost)
-    f_high = lam_high - float(lam_bar) / float((2 * sigma_lam))
-    while f_high <= 0:
-        lam_high = 2 * lam_high
-        G.set_lambda(lam_high)
-        discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-            G, R, varcost, fully=False, tol=tol)
-        # solve_var(G, lam_high)
+    stop_tol = 1e-6
 
-        # discount, nmcc_time, scc_time = solve_mcf_sa(G, R, fully=True)
-
-        # discount, nmcc_time, scc_time = solve_mcf_sa(G, R)
-        disc_tot += discount
-        nmcc_tot += nmcc_time
-        sigma_lam = np.sqrt(varcost)
-        f_high = lam_high - float(lam_bar) / float((2 * sigma_lam))
-
-    end = time.time()
-    elapsed = end - start - disc_tot + nmcc_tot
-    return lam_high, f_high, elapsed, varcost
-
-def get_sigma_cost(G, lam):
-    G.set_lambda(lam=lam)
-    solve_var(G, lam)
-    return np.sqrt(G.var_cost())
-
-def plot_flam(G, answer):
-    import matplotlib.pyplot as plt
-    lam_bar_l = [1e1, 1e3, 1e5, 1e7]
-    for lam_bar in lam_bar_l:
-        sigma_cost = get_sigma_cost(G, 0)
-        lower_lam = lam_bar / (2 * sigma_cost)
-        sigma_cost = get_sigma_cost(G, lower_lam)
-        print('f_low: ', lower_lam - lam_bar / (2 * sigma_cost))
-        sigma_cost = get_sigma_cost(G, 1e9)
-        upper_lam = lam_bar / (2 * sigma_cost)
-        sigma_cost = get_sigma_cost(G, upper_lam)
-
-        print('f_high: ', upper_lam - lam_bar / (2 * sigma_cost))
-
-        print('lam_bar: ', lam_bar)
-        print('lower: ', lower_lam)
-        print('upper: ', upper_lam)
-        print('answer: ', answer)
-
-        lamlist = []
-        flamlist = []
-        for lam in np.linspace(lower_lam, upper_lam, num=100, endpoint=False):
-            sigma_cost = get_sigma_cost(G, lam)
-            flam = lam - lam_bar / (2 * sigma_cost)
-            lamlist.append(lam)
-            flamlist.append(flam)
-
-        print(lamlist[0], flamlist[0])
-        plt.plot(lamlist, flamlist, 'o')
-        plt.show()
-        pdb.set_trace()
-
-
-def alg3(**kwargs):
-    print('-----ALG3------')
-
-    if kwargs['G'] != None:
-        G = copy.deepcopy(kwargs['G'])
-    else:
-        G = create_random_graph(**kwargs)
-    start = time.time()
-    if kwargs['R'] != None:
-        R = copy.deepcopy(kwargs['R'])
-    else:
-        R = G.build_res_network()
-
-    lam_bar = kwargs['lam_bar']
-    stop_tol = kwargs['stop_tol']
-    subproblem_tol = kwargs['subproblem_tol']
-    precision_start_tol = kwargs['precision_start_tol']
-    muscalar = kwargs['mu_scalar']
-    disc_me_tot = 0
-
-    disc_tot = 0
-    nmcc_time_tot = 0
-    scc_time_tot = 0
-    lams = []
-    # m=G.nxg.number_of_edges()
-    # decoyG = copy.deepcopy(G)
-    # decoyG.set_lambda(lam=0.01)
-    # decoyR = copy.deepcopy(R)
-    # nx.set_edge_attributes(decoyG.nxg, 0, 'mu')
-    # varcost = None
-    # discount, nmcc_time, scc_time, varcost=solve_mcf_sa(
-    #     decoyG, decoyR, varcost, fully=False, tol=subproblem_tol)
-    # disc_tot += discount
-    # nmcc_time_tot += nmcc_time
-    # scc_time_tot += scc_time
-    # lam_high = lam_bar/(2*np.sqrt(varcost))
-    # lam = lam_high/2
-    varcost = kwargs['start_varcost']
-    nmcc_time_start = kwargs['add_time']
-    lam_high = kwargs['lam_high']
-    lam = kwargs['startlam']
-    # lams.append(lam)
-
-    # lam_high, f_lam, lam_bound_time,varcost = get_upper_bound(G, R, lam_bar, subproblem_tol,muscalar)
-    # uppertime = time.time()-start_uptime
-    # lam_bound_time = 0
-    # uppertime = 0
-    # lam = lam_high
-
-    lam_low = kwargs['lam_low']
+    f = 100
     iters = 0
     found = False
-    # gap=[]
-    # gap_perc=[]
-    subproblem_times = []
-    times = []
-    objs = []
-    sub_start = time.time()
-    discount = time.time()
-    G.set_muscalar(kwargs['mu_scalar'])
-    # sigmacost = np.sqrt(varcost)
-    # algo_obj = (lam_bar * sigmacost + G.mu_cost() *
-    #             kwargs['mu_scalar']) * kwargs['obj_scalar']
-    # algo_obj= (lam_bar * sigmacost + G.mu_cost()) * kwargs['obj_scalar']
-    # gap_perc.append(abs(1 - algo_obj / kwargs['cvx_obj']))
-    # gap.append(abs(algo_obj - kwargs['cvx_obj']))
-    # objs.append(algo_obj)
-    # disc_tot += time.time() - discount
-    subproblem_times.append(nmcc_time_start)
-    times.append(time.time() - start - disc_tot + nmcc_time_start)
-    # f = lam - lam_bar / (2 * sigmacost)
-    f = 100
-    lam_prev = None
-    f_prev = np.inf
-    xicost = 1e6
-    nfultol = 1e-2
-    nfultol2 = 1e-1
+
+    if lp:
+        if prob is None:
+            high = np.ones(G.m) * G.lambar
+            low = np.ones(G.m) * low
+
+    if prob is not None:
+        warm_start = True
+    else:
+        warm_start = False
+
+    mid = 10000
+    iter_objs = []
+    iter_elapsed = []
+
+    infeas = []
+    lams = []
+    fs = []
+    acceptablegap = 1e-8
 
     while not found:
-
         iters += 1
-        G.set_lambda(lam=lam)
+        mid_prev = mid
+        mid = (high + low) / 2.0
 
-        # if abs(f_lam) <= precision_start_tol:
-        discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-            G, R, varcost, fully=True, nfullytol=nfultol, var_cost_ful=kwargs['varcostful'], difftol=1e-2)
-        disc_tot += discount
-        nmcc_time_tot += nmcc_time
-        scc_time_tot += scc_time
-        if f <= kwargs['precision_start_tol']:
-            nfultol = 1e-4
-            nfultol2 = 1e-1
+        if iters > 1 and warm_start == False:
+            warm_start = True
 
+        lams.append(mid)
+        print(mid)
+        obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
+            G, mid, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy, acceptablegap=acceptablegap, callback=False)
+
+        infeas.append(max_infeas)
+        var_cost = np.multiply(G.var, x).dot(x)
+        obj = G.mu.dot(x) + G.lambar * (np.sqrt(var_cost))
+
+        print(obj, time.time() - start, f)
+
+        iter_objs.append(obj)
+        iter_elapsed.append(time.time() - start)
+
+        if lp:
+            f = mid - G.lambar * np.multiply(G.var, x) / np.sqrt(var_cost)
+        else:
+            f = mid - G.lambar / (2.0 * np.sqrt(var_cost))
+
+        # if lp:
+        #     if np.all(f) < stop_tol or iters > 9:
+        #         found = True
+        #         break
         # else:
-        #     if iters!=1:
-        #         discount, nmcc_time, scc_time, varcost=solve_mcf_sa(
-        #             G, R, varcost, fully=False, tol=subproblem_tol)
-        #         disc_tot += discount
-        #         nmcc_time_tot += nmcc_time
-        #         scc_time_tot += scc_time
+        #     fs.append(f)
+        #     if solver_weird:
+        #         if abs(f) <= stop_tol:
+        #             pdb.set_trace()
+        #             found = True
+        #             break
         #     else:
-        #         pass
+        #         if abs(f) < stop_tol:
+        #             found = True
+        #             break
 
-        subproblem_times.append(time.time() - sub_start - discount + nmcc_time)
-        sigmacost = np.sqrt(varcost)
-        disc_me = time.time()
+        if lp:
+            pos = np.argwhere(np.sign(f) == np.sign(1))
+            neg = np.argwhere(np.sign(f) == -np.sign(1))
 
-        algo_obj= (lam_bar * sigmacost + G.mu_cost())
+            high[pos] = mid[pos]
+            low[neg] = mid[neg]
+        else:
+            if np.sign(f) == np.sign(1):
+                high = mid
+            else:
+                low = mid
+        if iters > 30 or 100 * abs(obj - solver_obj) / min(obj, solver_obj) < 1e-3:
+            break
 
-        # gap_perc.append(abs(1 - algo_obj / kwargs['cvx_obj']))
-        # gap.append(abs(algo_obj - kwargs['cvx_obj']))
-        objs.append(algo_obj)
+    elapsed = time.time() - start
+    if cvxpy:
+        return obj, elapsed, x, iter_objs, iter_elapsed, None, lams, fs
+
+    else:
+        infeas = np.array(infeas)
+        return obj, elapsed, x, iter_objs, iter_elapsed, infeas.mean(), lams, fs
+
+
+def nr_cvxpy(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird=False, cvxpy=False, solver_obj=None):
+    print('nr')
+    start = time.time()
+    stop_tol = 1e-6
+
+    if lp:
+        if prob is None:
+            high = np.ones(G.m) * G.lambar
+            low = np.ones(G.m) * low
+
+    lam = (high + low) / 2.0
+
+    if lam_init is not None:
+        lam = lam_init
+
+    found = False
+    f = 100
+    iters = 0
+    warm_start = False
+    prob = None
+    warm_start_xi = False
+    prob_xi = None
+
+    iter_elapsed = []
+    iter_objs = []
+
+    iter_var_times = []
+    iter_xi_times = []
+
+    lam_prev = 1000
+    mean = []
+    var = []
+
+    infeas = []
+    fs = []
+    lams = []
+    acceptablegap = 1e-8
+    callback = False
+    while not found:
+        iters += 1
+
+        if iters > 1:
+            warm_start = True
+            warm_start_xi = True
+        print(lam)
         lams.append(lam)
 
-        # print('algo_obj and f and lam ', algo_obj, f, lam)
-        times.append(time.time() - start - disc_tot +
-                     nmcc_time_tot - scc_time_tot + nmcc_time_start)
+        obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
+            G, lam, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy, acceptablegap=acceptablegap, callback=callback)
+        iter_var_times.append(elapsed)
+        infeas.append(max_infeas)
+        var_cost = np.multiply(G.var, x).dot(x)
+        cur_mean = G.mu.dot(x)
+        obj = cur_mean + G.lambar * (np.sqrt(var_cost))
+        iter_objs.append(obj)
+        iter_elapsed.append(time.time() - start)
 
-        disc_tot += time.time() - disc_me
+        mean.append(cur_mean)
+        var.append(var_cost)
+
+        # soln_diff = np.linalg.norm(x - solver_soln)
+        print(obj, time.time() - start, f)  # , soln_diff)
+
+        if lp:
+            f = lam - G.lambar * np.multiply(G.var, x) / np.sqrt(var_cost)
+        else:
+            f = lam - G.lambar / (2.0 * np.sqrt(var_cost))
+
+        # if lp:
+        #     if np.all(f) < stop_tol or iters > 5:
+        #         found = True
+        #         break
+        # else:
+        #     fs.append(f)
+        #     if solver_weird:
+        #         if abs(f) <= stop_tol:
+        #             found = True
+        #             break
+        #     else:
+        #         if abs(f) < stop_tol:
+        #             found = True
+        #             break
+
+        elapsed_xi, xi, prob_xi, max_infeas = cvxpy_solve_xi(
+            G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters, cvxpy=cvxpy, acceptablegap=1e-8, callback=callback)
+        iter_xi_times.append(elapsed_xi)
+        infeas.append(max_infeas)
+
+        if lp:
+            var_x = np.multiply(G.var, x)
+            f_lam_der = 1.0 - ((G.lambar * np.multiply(G.var, xi)) / (np.sqrt(var_cost)) - (
+                (G.lambar * np.multiply(var_x.dot(var_x), xi)) / (var_cost**(3.0 / 2.0))))
+        else:
+            xi_cost = np.multiply(G.var, x).dot(xi)
+            f_lam_der = 1.0 + (G.lambar * xi_cost) / \
+                (2 * var_cost**(3.0 / 2.0))
+
+        lam_prev = lam
+        lam = lam - f / f_lam_der
+
+        if lp:
+            lam = np.maximum(lam, np.zeros(G.m))
+
+        if iters > 9 or 100 * abs(obj - solver_obj) / min(obj, solver_obj) < 1e-3:
+            break
+
+    elapsed = time.time() - start
+
+    if cvxpy:
+        return obj, elapsed, x, iter_objs, iter_elapsed, iter_xi_times, iter_var_times, mean, var,  None, lams, fs
+
+    else:
+        infeas = np.array(infeas)
+        return obj, elapsed, x, iter_objs, iter_elapsed, iter_xi_times, iter_var_times, mean, var,  infeas.mean(), lams, fs
+
+
+def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird=False, cvxpy=False, solver_obj=None):
+
+    start = time.time()
+    stop_tol = 1e-6
+
+    lam = (high + low) / 2.0
+    lam_high = high
+    lam_low = low
+    
+    if lam_init is not None:
+        lam = lam_init
+
+    found = False
+    f = 100
+    iters = 0
+    warm_start = False
+    prob = None
+    warm_start_xi = False
+    prob_xi = None
+
+    iter_elapsed = []
+    iter_objs = []
+
+    iter_var_times = []
+    iter_xi_times = []
+
+    lam_prev = 1000
+    mean = []
+    var = []
+
+    infeas = []
+    fs = []
+    lams = []
+    acceptablegap = 1e-8
+    callback = False
+
+    lam_prev = None
+    f_prev = np.inf
+
+
+    while not found:
+        iters += 1
+
+        if iters > 1:
+            warm_start = True
+            warm_start_xi = True
+        print(lam)
+        lams.append(lam)
+
+        obj, elapsed, x, prob, max_infeas = cvxpy_solve_additive(
+            G, lam, prob=prob, warm_start=warm_start, lp=lp, cvxpy=cvxpy, acceptablegap=acceptablegap, callback=callback)
+
+        var_cost = np.multiply(G.var, x).dot(x)
+        cur_mean = G.mu.dot(x)
+        obj = cur_mean + G.lambar * (np.sqrt(var_cost))
+        iter_objs.append(obj)
+        iter_elapsed.append(time.time() - start)
+
+        mean.append(cur_mean)
+        var.append(var_cost)
+
+        print(obj, time.time() - start, f)  
 
         f_prev = f
-        f = lam - lam_bar / (2 * sigmacost)
+        if lp:
+            f = lam - G.lambar * np.multiply(G.var, x) / np.sqrt(var_cost)
+        else:
+            f = lam - G.lambar / (2.0 * np.sqrt(var_cost))
 
-        if abs(f) < kwargs['stop_tol']:  # or algo_obj<=kwargs['cvx_obj']:
-            found = True
+
+        if iters > 9 or 100 * abs(obj - solver_obj) / min(obj, solver_obj) < 1e-3:
             break
+
 
         # if np.linalg.norm(f_lam) <= np.linalg.norm(f_prev):
 
         if abs(f) <= abs(f_prev):
-            if iters == 1:
-                G.find_feasible_flow_xi()
-                R_xi = G.build_res_network_xi()
 
-            discount, nmcc_time, scc_time, xicost = solve_xi_mmc(
-                G, R_xi, xicost, fully=True, nfullytol=nfultol2, tol=kwargs['sensitivity_tol'], difftol=1e0, vartop=kwargs['var_top'])
+            elapsed_xi, xi, prob_xi, max_infeas = cvxpy_solve_xi(
+                G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters, cvxpy=cvxpy, acceptablegap=1e-8, callback=callback)
 
-            disc_tot += discount
-            nmcc_time_tot += nmcc_time
-            scc_time_tot += scc_time
-            f_lam_der = 1 + (lam_bar / 2) * (varcost**(-3 / 2)) * xicost
+
+            xi_cost = np.multiply(G.var, x).dot(xi)
+            f_lam_der = 1.0 + (G.lambar * xi_cost) / (2 * var_cost**(3.0 / 2.0))
+
             lam_prev = lam
-            lam = lam_prev - f / f_lam_der
+            lam = lam - f / f_lam_der
 
 
             lam_high_prev = lam_high
@@ -2267,1260 +871,592 @@ def alg3(**kwargs):
             # pdb.set_trace()
             lam = (lam_high_prev + lam_low_prev) / 2
 
-    end = time.time()
-    return algo_obj, iters, np.array(subproblem_times), times, objs, lams
+    elapsed = time.time() - start
+
+    return obj, elapsed, x, iter_objs, iter_elapsed
+    
+
+#### EXPERIMENTS ####
 
 
-def NR_solve(**kwargs):
-    print('-----NR------')
+def get_networks(experiment, tails, exponents, types, test=False, fam='netgen', lams=[]):
 
-    if kwargs['G'] != None:
-        G = copy.deepcopy(kwargs['G'])
-    else:
-        G = create_random_graph(**kwargs)
+    networks = []
+    fam_base = fam
 
-    start = time.time()
-    if kwargs['R'] != None:
-        R = copy.deepcopy(kwargs['R'])
-    else:
-        R = G.build_res_network()
-    vartop = kwargs['vartop']
-    lam_bar = kwargs['lam_bar']
-    stop_tol = kwargs['stop_tol']
-    subproblem_tol = kwargs['subproblem_tol']
-    precision_start_tol = kwargs['precision_start_tol']
-    muscalar = kwargs['mu_scalar']
-    disc_me_tot = 0
+    extension = 'pickle'
+    for tail in tails:
+        for exponent in exponents:
+            if experiment == 'varying_lambar':
+                for atype in types:
+                    for lambar in lams:
+                        lam_dir = str(lambar).replace('.', '_')
+                        net_name = fam_base + atype + exponent + tail
+                        cur_run = experiment + '/' + fam_base + \
+                            '/' + net_name[:net_name.find('.')] + '_' + lam_dir
+                        cur_run = os.path.join(
+                            EXPERIMENT_PATH, cur_run + "." + extension)
+                        if not test:
+                            if not os.path.isfile(cur_run):
+                                if not net_name in networks:
+                                    networks.append(net_name)
+                        else:
+                            if not net_name in networks:
+                                networks.append(net_name)
 
-    disc_tot = 0
-    nmcc_time_tot = 0
-    scc_time_tot = 0
-    lams = []
-    # m=G.nxg.number_of_edges()
-    # decoyG = copy.deepcopy(G)
-    # decoyG.set_lambda(lam=0.01)
-    # decoyR = copy.deepcopy(R)
-    # nx.set_edge_attributes(decoyG.nxg, 0, 'mu')
-    # varcost = None
-    # discount, nmcc_time, scc_time, varcost=solve_mcf_sa(
-    #     decoyG, decoyR, varcost, fully=False, tol=subproblem_tol)
-    # disc_tot += discount
-    # nmcc_time_tot += nmcc_time
-    # scc_time_tot += scc_time
-    # lam_high = lam_bar/(2*np.sqrt(varcost))
-    # lam = lam_high/2
-    varcost = kwargs['start_varcost']
-    nmcc_time_start = kwargs['add_time']
-    lam_high = kwargs['lam_high']
-    lam = kwargs['startlam']
-    # lams.append(lam)
+            else:
 
-    # lam_high, f_lam, lam_bound_time,varcost = get_upper_bound(G, R, lam_bar, subproblem_tol, muscalar)
-    # uppertime = time.time()-start_uptime
-    # lam = lam_high
-    # uppertime = 0
-    # lam_bound_time = 0
+                for atype in types:
+                    net_name = fam_base + atype + exponent + tail
+                    cur_run = experiment + '/' + fam_base + \
+                        '/' + net_name[:net_name.find('.')]
+                    cur_run = os.path.join(
+                        EXPERIMENT_PATH, cur_run + "." + extension)
+                    # if not test:
+                    #     if not os.path.isfile(cur_run):
+                    #         networks.append(net_name)
+                    # else:
+                    networks.append(net_name)
 
-    iters = 0
-    found = False
-    subproblem_times = []
-    # gap=[]
-    # gap_perc=[]
-    times = []
-    objs = []
-    sub_start = time.time()
-    # discount = time.time()
-    G.set_muscalar(kwargs['mu_scalar'])
-
-    # sigmacost = np.sqrt(varcost)
-    # algo_obj = (lam_bar * sigmacost + G.mu_cost() *
-    #             kwargs['mu_scalar']) * kwargs['obj_scalar']
-    # # algo_obj= (lam_bar * sigmacost + G.mu_cost()) * kwargs['obj_scalar']
-
-    # gap_perc.append(abs(1 - algo_obj / kwargs['cvx_obj']))
-    # gap.append(abs(algo_obj - kwargs['cvx_obj']))
-    # objs.append(algo_obj)
-    # disc_tot += time.time() - discount
-    subproblem_times.append(nmcc_time_start)
-    times.append(time.time() - start - disc_tot + nmcc_time_start)
-
-    elapsed = 0
-    cvx_elapsed = 0
-    xicost = 1e6
-    # f = lam - lam_bar / (2 * sigmacost)
-    f = 100
-    nfultol = 1e-2
-    nfultol2 = 1e-1
-
-    while not found:
-        iters += 1
-        G.set_lambda(lam=lam)
-        sub_start = time.time()
-        # if abs(f_lam) <= precision_start_tol:
-        discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-            G, R, varcost, fully=True, nfullytol=nfultol, var_cost_ful=kwargs['varcostful'], vartop = vartop , difftol=1e-2)
-        disc_tot += discount
-        nmcc_time_tot += nmcc_time
-        scc_time_tot += scc_time
-        if f <= kwargs['precision_start_tol']:
-            nfultol = 1e-4
-            nfultol2 = 1e-1
-
-        # else:
-        #     if iters != 1:
-        #         discount, nmcc_time, scc_time, varcost=solve_mcf_sa(
-        #             G, R, varcost, fully=False, tol=subproblem_tol)
-        #         disc_tot += discount
-        #         nmcc_time_tot += nmcc_time
-        #         scc_time_tot += scc_time
-        #     else:
-        #         pass
-
-        subproblem_times.append(
-            time.time() - sub_start - discount + nmcc_time - scc_time)
-        disc_me = time.time()
-        sigmacost = np.sqrt(varcost)
-
-        # algo_obj = (lam * varcost + G.mu_cost() *
-        #             kwargs['mu_scalar']) * kwargs['obj_scalar']
-        algo_obj= (lam_bar * sigmacost + G.mu_cost())
-
-        # algo_obj= (lam_bar * sigmacost + G.mu_cost()) * kwargs['obj_scalar']
-        # print(algo_obj)
-
-        # gap.append(abs(algo_obj - kwargs['cvx_obj']))
-        # gap_perc.append(abs(1 - algo_obj / kwargs['cvx_obj']))
-        objs.append(algo_obj)
-        times.append(time.time() - start - elapsed -
-                     disc_tot + nmcc_time_tot - scc_time_tot + nmcc_time_start)
-        # print('algo_obj and f and lam', algo_obj, f, lam)
-        disc_tot += time.time() - disc_me
-
-        sigmacost = np.sqrt(varcost)
-        f = lam - lam_bar / (2 * sigmacost)
-        # print(f_lam)
-        # kwargs['stop_tol']
-        lams.append(lam)
-
-        if abs(f) < kwargs['stop_tol']:  # or algo_obj<=kwargs['cvx_obj']:
-            found = True
-            break
-
-        if iters == 1:
-            G.find_feasible_flow_xi()
-            R_xi = G.build_res_network_xi()
+    return networks
 
 
-        # if abs(f_lam) < precision_start_tol:
-        #     discount, nmcc_time, scc_time, xicost=solve_xi_mmc(
-        #         G, R_xi, xicost, fully=True)
-        # else:
-        #     discount, nmcc_time, scc_time, xicost=solve_xi_mmc(
-        #         G, R_xi, xicost, fully=False, tol=subproblem_tol)
+def small_test_case():
+    # testcase
+    if test:
+        lambar = 10
+        G = MCF_DiGraph(lambar)
+        G.nxg = nx.DiGraph()
 
-        new_flow, new_cost = solve_xi_new(G, lam)
+        G.m = 3
+        G.n = 3
+        G.mu = np.array([0.0, 0.0, 0.0])
+        G.var = np.array([0.5, 0.5, 1.0])
+        G.b = np.array([1.0, 0, -1.0])
+        G.cap = np.array([1.0, 1.0, 1.0])
+        G.rows = [0, 0, 1, 1, 2, 2, ]
+        G.cols = [0, 2, 0, 1, 1, 2]
+        G.values = np.array([1.0, 1.0, -1.0, 1.0, -1.0, -1.0])
 
-        old_flow, old_cost = solve_xi(G, lam)
+        solver_obj, solver_elapsed, solver_soln = cvxpy_solve(G)
+        print('Solver finished in {} seconds, with objective {}'.format(
+            solver_elapsed, solver_obj))
 
-        discount, nmcc_time, scc_time, xicost = solve_xi_mmc(G, R_xi, xicost, fully=True, nfullytol=1e-3, tol=kwargs['sensitivity_tol'], difftol=1e0, vartop=kwargs['var_top'])
         pdb.set_trace()
 
-        discount, nmcc_time, scc_time, xicost = solve_xi_mmc(
-        G, R_xi, xicost, fully=True, nfullytol=nfultol2, tol=kwargs['sensitivity_tol'], difftol=1e0, vartop=kwargs['var_top'])
+        bs_obj, bs_elapsed, bs_soln, bs_iters = bs_cvxpy(
+            G, lp=False, low=0, high=lambar, test=test)
 
-        disc_tot += discount
-        nmcc_time_tot += nmcc_time
-        scc_time_tot += scc_time
-
-        if kwargs['way'] == 'newxicost':
-            discount, nmcc_time, scc_time, xicost = solve_xi_mmc(
-            G, R_xi, xicost, fully=True, nfullytol=nfultol2, tol=kwargs['sensitivity_tol'], difftol=1e0, vartop=kwargs['var_top'])
-
-            disc_tot += discount
-            nmcc_time_tot += nmcc_time
-            scc_time_tot += scc_time
-
-        elif kwargs['way'] == 'oldformul':
-            old_flow, old_cost = solve_xi(G, lam)
-            xicost = old_cost
-
-        elif kwargs['way'] == 'newformul':
-            new_flow, new_cost = solve_xi_new(G, lam)
-            xicost = new_cost
-
-        f_lam_der = 1 + (lam_bar / 2) * (varcost**(-3 / 2)) * xicost
-        # f_lam_der = 1
-        # print(f, f_lam_der, f/f_lam_der)
-
-        # lam = lam - f / f_lam_der
-        lam = lam - f
-        print('lam: ', lam)
-
-    end = time.time()
-    # print('lam: ', lam)
-    print(end - start)
-    print(lam)
-    pdb.set_trace()
-    # cur_r_dict = nx.to_dict_of_dicts(G.nxg)
-    # cc = [v for v in cur_r_dict.keys()]
-    # list_ofed = []
-    # for c in cc:
-    #     if 10000 in cur_r_dict[c].keys():
-    #         list_ofed.append(c)
-
-    # flows = []
-    # for e in list_ofed:
-    #     flows.append(G.nxg[e][10000]['flow'])
-
-    # flows = sum(np.array(flows))
-    # print(flows)
-    return algo_obj, iters, np.array(subproblem_times), times, objs, lams
+        pdb.set_trace()
 
 
-def bisect_solve(**kwargs):
-    print('-----BISECTION------')
-    if kwargs['G'] != None:
-        G = copy.deepcopy(kwargs['G'])
-    else:
-        G = create_random_graph(**kwargs)
-    start = time.time()
+def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=False, which='cp'):
+    experiment = 'graph_families'
 
-    if kwargs['R'] != None:
-        R = copy.deepcopy(kwargs['R'])
-    else:
-        R = G.build_res_network()
+    for network in networks:
+        G = MCF_DiGraph(lambar)
+        G.nxg = nx.DiGraph()
+        print(network)
 
-    lam_bar = kwargs['lam_bar']
-    stop_tol = kwargs['stop_tol']
-    subproblem_tol = kwargs['subproblem_tol_bs']
-    precision_start_tol = kwargs['precision_start_tol_bs']
-    muscalar = kwargs['mu_scalar']
-    found = False
-    iters = 0
+        if network.find('goto') >= 0:
+            generator = 'goto'
+            filename = 'networks/goto/' + network
 
-    disc_tot = 0
-    nmcc_time_tot = 0
-    scc_time_tot = 0
-    lams = []
-
-    varcost = kwargs['start_varcost_bs']
-    nmcc_time_start = kwargs['add_time_bs']
-    lam_high = kwargs['lam_high_bs']
-    lam = kwargs['startlam_bs']
-    low = kwargs['lam_low']
-
-    # sigmacost = np.sqrt(varcost)
-    high = lam_high
-    f = 100
-
-    objs = []
-    subproblem_times = []
-    times = []
-    G.set_muscalar(kwargs['mu_scalar'])
-
-    # discount = time.time()
-    # algo_obj = (lam_bar * sigmacost + G.mu_cost() *
-    #             kwargs['mu_scalar']) * kwargs['obj_scalar']
-
-    # objs.append(algo_obj)
-    # disc_tot += time.time() - discount
-    subproblem_times.append(nmcc_time_start)
-    times.append(time.time() - start - disc_tot + nmcc_time_start)
-    nfultol = 1e-2
-
-    while not found:
-        iters += 1
-        mid = (high + low) / 2.0
-        sub_start = time.time()
-        G.set_lambda(lam=mid)
-
-        if abs(f) <= kwargs['precision_start_tol_bs']:
-            nfultol = 1e-4
-
-        discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-            G, R, varcost, fully=True, nfullytol=nfultol, var_cost_ful=kwargs['varcostful'], vartop=kwargs['var_top'], mutop=kwargs['mu_top'], difftol=1e-2)
-        disc_tot += discount
-        nmcc_time_tot += nmcc_time
-        scc_time_tot += scc_time
-
-        subproblem_times.append(
-            time.time() - sub_start - discount + nmcc_time - scc_time)
-
-        sigmacost = np.sqrt(varcost)
-
-        disc_me = time.time()
-        algo_obj= (lam_bar * sigmacost + G.mu_cost())
-
-        # algo_obj = (mid * varcost + G.mu_cost() *
-        #             kwargs['mu_scalar']) * kwargs['obj_scalar']
-        times.append(time.time() - start - disc_tot +
-                     nmcc_time_tot - scc_time_tot + nmcc_time_start)
-
-        objs.append(algo_obj)
-        lams.append(mid)
-
-        print('algo_obj: {}, f: {}, lam: {}'.format(algo_obj, f, mid))
-
-        disc_tot += time.time() - disc_me
-        f = mid - float(lam_bar) / float((2 * sigmacost))
-
-        if abs(f) < kwargs['stop_tol']:
-            found = True
-            break
-
-        if np.sign(f) == np.sign(1):
-            high = mid
         else:
-            low = mid
+            generator = 'netgen'
+            filename = 'networks/netgen/' + network
 
-        mid_prev = mid
+        G = load_data(networkFileName=filename, G=G, generator=generator)
 
-    end = time.time()
+        run_name = experiment + '/' + generator + \
+            '/' + network[:network.find('.')]
+        cplex_saved = experiment + '/' + generator + '/' + 'cplex' + \
+            '/' + network[:network.find('.')] + "_cplex_results"
 
-    # cur_r_dict = nx.to_dict_of_dicts(G.nxg)
-    # cc = [v for v in cur_r_dict.keys()]
-    # list_ofed = []
-    # endnode = len(G.nxg.nodes())
-    # for c in cc:
-    #     if endnode in cur_r_dict[c].keys():
-    #         list_ofed.append(c)
+        cvxpy_alg = cvxpy
 
-    # flows = []
-    # for e in list_ofed:
-    #     flows.append(G.nxg[e][endnode]['flow'])
+        if network.find('15') >= 0:
 
-    # sflows = sum(np.array(flows))
-    # print('totflow: ', sflows)
-    # x = nx.get_edge_attributes(G.nxg, 'flow')
+            cp_saved = experiment + '/' + generator + '/' + \
+                network[:network.find('.')] + "_cp_results"
 
-    return algo_obj, iters, np.array(subproblem_times), times, objs, lams, 5
+            if not os.path.isfile(os.path.join(EXPERIMENT_PATH, cp_saved) + '.pickle'):
 
-def run_experiment(num_nodes, lams, mus, variances, d_tops, experiment_name, multi_arcs=False, seeds=9* np.arange(10), repeat=10, test4dense=False, fixmsk=False, fix_bs=False, start_range=0, test=False):
-    num_nodes = num_nodes
-    lams = lams
-    mus = mus
-    variances = variances
-    parameterszip = list(itertools.product(num_nodes, lams, mus, variances, d_tops))
-    experiment_name = experiment_name + '/'
-    lamBar = lams[0]
-    for parameter_set in parameterszip:
-        n = parameter_set[0]
-        lamBar = parameter_set[1]
-        mu_top = parameter_set[2]
-        var_top = parameter_set[3]
-        d_top = parameter_set[4]
-        cur_lam = parameter_set[1]
-        if multi_arcs:
-            num_arcs = [n*2, n*8]
+                status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                    G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+
+                keys = ['solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals',
+                        'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas']
+                values = [status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible,
+                          solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas]
+
+                run_dict = dict(zip(keys, values))
+
+                os.makedirs(cp_saved, exist_ok=True)
+
+                save_run(cp_saved, run_dict)
+
+            if which == 'nr':
+
+                nr_saved = experiment + '/' + generator + '/' + \
+                    network[:network.find('.')] + "_nr_results"
+
+                if not os.path.isfile(os.path.join(EXPERIMENT_PATH, nr_saved) + '.pickle'):
+                    filename = cp_saved
+                    data_dic = load_run(filename)
+                    solver_obj = data_dic['solver_obj']
+
+                    _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+                        G, lam=0, lp=True, cvxpy=cvxpy_alg)
+                    var_cost = np.multiply(G.var, soln).dot(soln)
+                    lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+
+                    nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
+                        G, lp=False, low=lam_low, high=G.lambar / 2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+
+                    keys = ['nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
+                            'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'elapsed_lower_bound']
+                    values = [nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
+                              nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, lb_elapsed]
+
+                    run_dict = dict(zip(keys, values))
+
+                    os.makedirs(nr_saved, exist_ok=True)
+
+                    save_run(nr_saved, run_dict)
+                continue
+
+            if which == 'bs':
+                bs_saved = experiment + '/' + generator + '/' + \
+                    network[:network.find('.')] + "_bs_results"
+
+                if not os.path.isfile(os.path.join(EXPERIMENT_PATH, bs_saved) + '.pickle'):
+                    filename = cp_saved
+                    data_dic = load_run(filename)
+                    solver_obj = data_dic['solver_obj']
+
+                    _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+                        G, lam=0, lp=True, cvxpy=cvxpy_alg)
+                    var_cost = np.multiply(G.var, soln).dot(soln)
+                    lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+
+                    _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
+                        G, lam=0, lp=False, bound_lam=True, cvxpy=cvxpy_alg, acceptablegap=1e-2)
+                    var_cost = np.multiply(G.var, soln).dot(soln)
+                    lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+
+                    bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
+                        G, lp=False, low=lam_low, high=lam_high, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+
+                    keys = ['bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas',
+                            'bs_lams', 'bs_fs', 'elapsed_lower_bound', 'elapsed_upper_bound', ]
+                    values = [bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed,
+                              bs_avg_infeas, bs_lams, bs_fs, lb_elapsed, ub_elapsed]
+
+                    run_dict = dict(zip(keys, values))
+
+                    os.makedirs(bs_saved, exist_ok=True)
+
+                    save_run(bs_saved, run_dict)
+                continue
+
+        # continue
+        if not os.path.isfile(os.path.join(EXPERIMENT_PATH, cplex_saved) + '.pickle'):
+            status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+
         else:
-            if test4dense:
-                num_arcs = [n*8]
-            else:
-                num_arcs = [n*4]
-
-        for narcs in num_arcs:
-
-            params = {}
-            # if lamBar / 5 == 1 or lamBar / 1 == 1:
-            #     scale = 1e1
-            # elif lamBar / 10 == 1:
-            #     scale = 1e2
-            # elif lamBar / 100 == 1:
-            #     scale = 1e3
-            # else:
-            #     scale = 1.0
-            scale = 1.0
-            params['mu_top'] = mu_top
-            params['var_top'] = var_top
-            params['d_top'] = d_top
-            params['scale'] = 1
-            params['lam_bar'] = lamBar / scale
-            params['num_nodes'] = n
-            params['sensitivity_tol'] = 1e-3
-            params['stop_tol'] = 1e-5
-            params['precision_start_tol'] = 1e-2
-            params['precision_start_tol_bs'] = 1e-2
-            params['subproblem_tol'] = 1e-1
-            params['subproblem_tol_bs'] = 1e-1
-            params['cvx_obj'] = None
-            params['mu_scalar'] = 1.0 / scale
-            params['var_scalar'] = 1.0  # scale*scale
-            params['obj_scalar'] = scale
-            params['num_arcs'] = narcs
-            params['varcostnoful'] = 1e0
-            params['varcostful'] = 1e0
-            params['xicostnoful'] = 1e0
-            seeds = seeds
-
-            times_cvx_list = []
-            times_bs_list = []
-            times_nr_list = []
-            gap_cvx_list = []
-            gap_bs_list = []
-            gap_nr_list = []
-
-            orig_var_top = var_top
-            print(repeat)
-            for i in range(start_range, repeat):
-                print(i)
-                first = True
-
-                gap_cvx = []
-                gap_perc_cvx = []
-                times_cvx = []
-                seed = seeds[i]
-                params['seed'] = seed
-                lamstr = str(lamBar / scale)
-                lamstr = lamstr.replace(".", "-")
-
-
-                save_extension = lamstr + '_' + \
-                    str(mu_top) + str(orig_var_top) + '_' + str(narcs) + \
-                    '_' + str(seed) + str(params['d_top'])
-
-                if experiment_name == 'varying_lams/':
-                    save_extension = str(mu_top) + str(var_top) + '_' + str(narcs) + \
-                    '_' + str(seed) + str(params['d_top'])
-
-                if experiment_name == 'varying_lams/':
-
-
-                    #     UG=read_and_create_graph(**params)
-                    #     save(UG, 'graph' + save_extension, n)
-                    # else:
-                    #     UG = load('graph' + save_extension, n)
-                    # UG=read_and_create_graph(**params)
-
-                    if first:
-                        print('first')
-                        UG = create_random_graph(**params)
-                        save(UG, 'graph' + save_extension, n)
-                    else:
-                        try:
-                            UG = load('graph' + save_extension, n)
-                            print('graph loaded')
-                        except:
-                            print('graph does not exists, creating now...')
-                            UG = create_random_graph(**params)
-                            save(UG, 'graph' + save_extension, n)
-                    first = False
-
-                    print('graph is ready')
-                    params['vartop'] = var_top
-                    params['G'] = UG
-
-                    res_time = time.time()
-                    UR = UG.build_res_network()
-                    res_time = time.time() - res_time
-                    res_time = 0
-                    params['R'] = None
-
-
-                    if lamBar ==0:
-                        varcost = None
-                        lamstr = str(round(lamBar, 6))
-                        print(params['lam_bar'])
-
-                        lamstr = lamstr.replace('.','')
-                        # discount, nmcc_time2, scc_time, varhigh = solve_mcf_sa_lin(
-                        #     UG, UR, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-3, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                        # mucost = UG.mu_cost() 
-                        # varcost = np.sqrt(UG.var_cost())
-                        # print('mu and var: ', mucost, varcost)
-                        # save(mucost, 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-                        # save(varcost, 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-                        print('lam is 0')
-                        cvx_mosek_obj, cvx_elapsed, mosek_overhead, x_msk, mucost, varcost = mosek_solve_lin(
-                        **params)
-                        print('mosek done in: ', cvx_elapsed)
-                        print('mosek obj: ', cvx_mosek_obj)
-                        print('mu and var: ', mucost, varcost)
-                        save(mucost, 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-                        save(varcost, 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-                    
-
-
-                    else:
-                        print('lam not 0')
-                        print(params['lam_bar'])
-                        lamstr = str(round(lamBar, 6))
-
-                        lamstr = lamstr.replace('.','')
-                        pdb.set_trace()
-                        cvx_mosek_obj, cvx_elapsed, mosek_overhead, x_msk, mucost, varcost = cplex_solve(
-                        **params)
-                        print('mosek done in: ', cvx_elapsed)
-                        print('mosek obj: ', cvx_mosek_obj)
-                        print('mu and var: ', mucost, varcost)
-                        save(mucost, 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-                        save(varcost, 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-                    continue
-
-                if experiment_name == 'varying_lams_2/':
-                    print('cur_lam: {}, lam: {}'.format(cur_lam, lamBar))
-                    lamstr = str(cur_lam / scale)
-                    lamstr = lamstr.replace(".", "-")
-
-                    #     UG=read_and_create_graph(**params)
-                    #     save(UG, 'graph' + save_extension, n)
-                    # else:
-                    #     UG = load('graph' + save_extension, n)
-                    # UG=read_and_create_graph(**params)
-
-                    # if first:
-                    #     print('first')
-                    #     UG = create_random_graph(**params)
-                    #     save(UG, 'graph' + save_extension, n)
-                    # else:
-                    try:
-                        UG = load('graph' + save_extension, n)
-                        print('graph loaded')
-                    except:
-                        print('graph does not exists, creating now...')
-                        UG = create_random_graph(**params)
-                        save(UG, 'graph' + save_extension, n)
-                    
-                    first = False
-
-                    multip = cur_lam / lamBar
-
-                    vardict = nx.get_edge_attributes(UG.nxg, 'var')
-                    for key in vardict:
-                        vardict[key] = vardict[key]*multip**2
-
-                    var_top = orig_var_top * multip**2
-                    
-
-                    save_extension = lamstr + '_' + \
-                    str(mu_top) + str(orig_var_top) + '_' + str(narcs) + \
-                    '_' + str(seed) + str(params['d_top'])
-
-                    nx.set_edge_attributes(UG.nxg, vardict, 'var')
-                    
-                    params['vartop'] = var_top
-                    params['G'] = UG
-
-                    res_time = time.time()
-                    UR = UG.build_res_network()
-                    res_time = time.time() - res_time
-                    res_time = 0
-                    params['R'] = None
-                    
-                    print('lam not 0')
-                    print(params['lam_bar'])
-                    params['cur_lam'] = cur_lam
-                    lamstr = str(round(lamBar, 6))
-
-                    lamstr = lamstr.replace('.','')
-                    cvx_mosek_obj, cvx_elapsed, mosek_overhead, x_msk, mucost, varcost = mosek_solve(
-                    **params)
-                    print('mosek done in: ', cvx_elapsed)
-                    print('mosek obj: ', cvx_mosek_obj)
-
-
-                    varcost = None
-                    decoyG2 = copy.deepcopy(UG)
-                    decoyR2 = copy.deepcopy(UR)
-
-                    discount, nmcc_time2, scc_time, varhigh = solve_mcf_sa_lin(
-                        decoyG2, decoyR2, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-4, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                    del decoyG2
-                    del decoyR2
-                    del UR
-                    lam_low = (lamBar / scale) / (2.0 * np.sqrt(varhigh))
-                    
-                    lam_high = (lamBar/scale)/2.0
-                    lam = (lam_high + lam_low) / 2
-
-                    print('lamhigh: ', lam_high)
-                    print('lamlow: ', lam_low)
-                    print('addtime: ', res_time + nmcc_time2)
-                    params['start_varcost'] = None
-                    params['add_time'] = res_time + nmcc_time2
-                    params['lam_high'] = lam_high
-                    params['lam_low'] = lam_low
-                    params['startlam'] = lam
-
-                    params['start_varcost_bs'] = None
-                    params['add_time_bs'] = res_time + nmcc_time2
-                    params['lam_high_bs'] = lam_high
-                    params['startlam_bs'] = lam
-                    params['max_iters'] = None
-
-
-                    params['way'] = 'none'
-                    nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                        **params)
-                    print('nr done in: ', times_nr[-1])
-                    print('nr obj: ', nr_obj)
-                    continue
-                    # params['way'] = 'newformul'
-                    # nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                    #     **params)
-                    # print('nr done in: ', times_nr[-1])
-                    # print('nr obj: ', nr_obj)
-                    
-                    # params['way'] = 'newxicost'
-                    # nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                    #     **params)
-                    # print('nr done in: ', times_nr[-1])
-                    # print('nr obj: ', nr_obj)
-
-                    # nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                    #     **params)
-                    # print('nr done in: ', times_nr[-1])
-                    # print('nr obj: ', nr_obj)
-
-                    # alg3_obj, alg3_iters, alg3_subproblem_times,  times_alg3, alg3_objs, alg3_lams = alg3(
-                    #     **params)
-                    # print('alg3 done in: ', times_alg3[-1])
-                    # print('alg3 obj: ', alg3_obj)
-
-                    # bs_obj, bs_iters, bs_subproblem_times, times_bs, bs_objs, bs_lams, x_bs = bisect_solve(
-                    #     **params)
-                    # print('bs done in: ', times_bs[-1])
-                    # print('bs obj: ', bs_obj)
-
-
-                    save(cvx_mosek_obj, 'cvx_mosek_obj' +
-                         save_extension, n, experiment_name)
-                    save(mosek_overhead, 'mosek_overhead_time' +
-                         save_extension, n, experiment_name)
-
-                    save(times_bs, 'times_bs' +
-                         save_extension, n, experiment_name)
-                    save(bs_subproblem_times, 'bs_subproblem_times' +
-                         save_extension, n, experiment_name)
-                    save(bs_objs, 'bs_objs' +
-                         save_extension, n, experiment_name)
-                    save(bs_lams, 'bs_lams' +
-                         save_extension, n, experiment_name)
-
-                    save(times_nr, 'times_nr' +
-                         save_extension, n, experiment_name)
-                    save(nr_subproblem_times, 'nr_subproblem_times' +
-                         save_extension, n, experiment_name)
-                    save(nr_objs, 'nr_objs' +
-                         save_extension, n, experiment_name)
-                    save(nr_lams, 'nr_lams' +
-                         save_extension, n, experiment_name)
-
-                    save(times_alg3, 'times_alg3' +
-                         save_extension, n, experiment_name)
-                    save(alg3_subproblem_times, 'alg3_subproblem_times' +
-                         save_extension, n, experiment_name)
-                    save(alg3_objs, 'alg3_objs' +
-                         save_extension, n, experiment_name)
-                    save(alg3_lams, 'alg3_lams' +
-                         save_extension, n, experiment_name)
-                    
-                    print('node, lambda_bar, mu, var, arcno, seed: ',
-                            n, cur_lam, mu_top, var_top, narcs, seeds[i])
-
-                    print(tabulate([['NR', nr_obj, times_nr[-1], nr_iters], ['ALG3', alg3_obj, times_alg3[-1], alg3_iters], ['BS', bs_obj, times_bs[-1], bs_iters], [
-                        'CVX', cvx_mosek_obj, cvx_elapsed, 1]], headers=['Method', 'Obj_Val', 'Solve_Time', 'Iterations']))
-
-                    continue
-
-
-
-
-
-                if experiment_name == 'varying_variance':
-                    for vv in [1, 10, 100]:
-                        
-                        try:
-                            UG = load('graph' + save_extension, n)
-                            print('graph loaded')
-                        except:
-                            print('graph does not exists, creating now...')
-                            UG = create_random_graph(**params)
-                            save(UG, 'graph' + save_extension, n)
-                        print('graph is ready')
-
-                        vardict = nx.get_edge_attributes(UG.nxg, 'var')
-                        for key in vardict:
-                            vardict[key] = vardict[key]*vv
-
-                        var_top = orig_var_top * vv
-                        
-                        save_extension = lamstr + '_' + \
-                        str(mu_top) + str(var_top) + '_' + str(narcs) + \
-                        '_' + str(seed) + str(params['d_top'])
-
-
-
-
-                        nx.set_edge_attributes(UG.nxg, vardict, 'var')
-
-                        print('node, lambda_bar, mu, var, arcno, seed: ',
-                          n, lamBar, mu_top, var_top, narcs, seeds[i])
-                        params['vartop'] = var_top
-                        params['G'] = UG
-
-                        # try:
-                        #     UG = load('graph' + save_extension, n)
-                        #     print('graph loaded')
-                        # except:
-                        print('graph does not exists, creating now...')
-                        # UG = create_random_graph(**params)
-                        save(UG, 'graph' + save_extension, n)
-                        print('graph is ready')
-
-
-                        res_time = time.time()
-                        UR = UG.build_res_network()
-                        res_time = time.time() - res_time
-                        res_time = 0
-                        params['R'] = None
-
-
-
-
-                    # subgrad(UG, lam=0.7)
-
-                if fixmsk:
-                    cvx_mosek_obj, cvx_elapsed, mosek_overhead = mosek_solve(
-                        **params)
-                    print('mosek done in: ', cvx_elapsed)
-                    print('mosek obj: ', cvx_mosek_obj)
-                    save(cvx_mosek_obj, 'cvx_mosek_obj' +
-                         save_extension, n, experiment_name)
-                    save(mosek_overhead, 'mosek_overhead_time' +
-                         save_extension, n, experiment_name)
+            filename = cplex_saved
+            data_dic = load_run(filename)
+
+            status = data_dic['solver_status']
+            feasible = data_dic['solver_feasible']
+            solver_elapsed = data_dic['solver_elapsed']
+            solver_obj = data_dic['solver_obj']
+            solver_duals = data_dic['solver_duals']
+            solver_primals = data_dic['solver_primals']
+            solver_is_feasible = data_dic['solver_is_feasible']
+            solver_primal_infeas = data_dic['solver_primal_infeas']
+            solver_iter_times = data_dic['solver_iter_times']
+            solver_feasible_dual = data_dic['solver_feasible_dual']
+            solver_feasible_primal = data_dic['solver_feasible_primal']
+            solver_infeas = data_dic['solver_infeas']
+
+        print('Solver finished in {} seconds, with objective {}'.format(
+            solver_elapsed, solver_obj))
+
+        _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(
+            G, lam=0, lp=True, cvxpy=cvxpy_alg)
+        var_cost = np.multiply(G.var, soln).dot(soln)
+        lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+
+        if not os.path.isfile(os.path.join(EXPERIMENT_PATH, run_name) + '.pickle'):
+
+            nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
+                G, lp=False, low=lam_low, high=G.lambar / 2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+            nr_elapsed += lb_elapsed
+
+            can_nr_elapsed = np.array(nr_iter_elapsed) + lb_elapsed
+            can_nr_gaps = abs(np.array(nr_iter_objs) - solver_obj) / \
+                np.minimum(np.array(nr_iter_objs), solver_obj)
+
+            print(can_nr_elapsed)
+            print(can_nr_gaps)
+
+            print('NR finished in {} seconds, with objective {}'.format(
+                nr_elapsed, nr_obj))
+        else:
+            filename = run_name
+            data_dic = load_run(filename)
+
+            nr_elapsed = data_dic['nr_elapsed']
+            nr_iter_elapsed = data_dic['nr_iter_elapsed']
+            nr_iter_objs = data_dic['nr_iter_objs']
+            nr_obj = data_dic['nr_obj']
+            nr_xi_times = data_dic['nr_xi_times']
+            nr_var_times = data_dic['nr_var_times']
+            mean = data_dic['mean']
+            var = data_dic['var']
+            nr_avg_infeas = data_dic['nr_avg_infeas']
+            nr_lams = data_dic['nr_lams']
+            nr_fs = data_dic['nr_fs']
+
+        if not os.path.isfile(os.path.join(EXPERIMENT_PATH, run_name) + '.pickle'):
+
+            _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
+                G, lam=0, lp=False, bound_lam=True, cvxpy=cvxpy_alg, acceptablegap=1e-2)
+            var_cost = np.multiply(G.var, soln).dot(soln)
+            lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+
+            print('ub_elapsed: ', ub_elapsed)
+            bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
+                G, lp=False, low=lam_low, high=lam_high, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+
+            can_bs_elapsed = np.array(
+                bs_iter_elapsed) + lb_elapsed + ub_elapsed
+            can_bs_gaps = abs(np.array(bs_iter_objs) - solver_obj) / \
+                np.minimum(np.array(bs_iter_objs), solver_obj)
+
+            print(can_bs_elapsed)
+            print(can_bs_gaps)
+
+            bs_elapsed += lb_elapsed + ub_elapsed
+            print('BSC finished in {} seconds, with objective {}'.format(
+                bs_elapsed, bs_obj))
+
+        else:
+
+            filename = run_name
+            data_dic = load_run(filename)
+
+            lb_elapsed = data_dic['elapsed_lower_bound']
+            ub_elapsed = data_dic['elapsed_upper_bound']
+            bs_obj = data_dic['bs_obj']
+            bs_iter_elapsed = data_dic['bs_iter_elapsed']
+            bs_iter_objs = data_dic['bs_iter_objs']
+            bs_elapsed = data_dic['bs_elapsed']
+            bs_avg_infeas = data_dic['bs_avg_infeas']
+            bs_lams = data_dic['bs_lams']
+            bs_fs = data_dic['bs_fs']
+
+        pdb.set_trace()
+        hybrid_obj, hybrid_elapsed, _, hybrid_iter_objs, hybrid_iter_elapsed = hybrid(
+                G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+
+
+        if cvxpy:
+            t = PrettyTable(['Method', 'Soln Time',
+                             '# Iters', 'Obj', 'Rel_Gap'])
+            t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
+                       solver_obj, '-'])
+            t.add_row(['NR', round(nr_elapsed, 2), len(nr_iter_elapsed),
+                       nr_obj, abs(solver_obj - nr_obj) / nr_obj])
+            t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
+                solver_obj - bs_obj) / bs_obj])
+        else:
+            t = PrettyTable(['Method', 'Soln Time', 'Status', 'Feasible',
+                             '# Iters', 'Obj', 'Rel_Gap', 'Infeas'])
+            t.add_row(['CPLEX', round(solver_elapsed, 2), status, feasible, '-',
+                       solver_obj, '-', round(solver_infeas, 3)])
+            t.add_row(['NR', round(nr_elapsed, 2), '-', '-', len(nr_iter_elapsed),
+                       nr_obj, abs(solver_obj - nr_obj) / nr_obj, round(nr_avg_infeas, 3)])
+            t.add_row(['BSC', round(bs_elapsed, 2), '-', '-', len(bs_iter_elapsed), bs_obj, abs(
+                solver_obj - bs_obj) / bs_obj, round(bs_avg_infeas, 3)])
+
+        print(t)
+
+        if record:
+
+            # solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
+
+            keys = ['network_name', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
+                    'nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
+                    'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'lambar', 'm', 'n',
+                    'elapsed_lower_bound', 'elapsed_upper_bound',
+                    'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs']
+
+            values = [network[:network.find('.')], status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
+                      nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
+                      nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, G.lambar, G.m, G.n, lb_elapsed, ub_elapsed,
+                      bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs]
+
+            run_dict = dict(zip(keys, values))
+
+            if not os.path.isfile(cplex_saved):
+                os.makedirs(cplex_saved, exist_ok=True)
+                if cvxpy:
+                    save_run(cplex_saved, run_dict, prefix='mosek')
                 else:
+                    save_run(cplex_saved, run_dict)
+            if cvxpy:
+                save_run(run_name, run_dict, prefix='mosek')
+            else:
+                save_run(run_name, run_dict)
 
-                    # if test == True:
-                    #     oldvar = nx.get_edge_attributes(UG.nxg, 'var')
-                    #     for key in oldvar:
-                    #         oldvar[key] = 100 * oldvar[key]
-                    #     nx.set_edge_attributes(UG.nxg, oldvar, 'var')
-
-                    # f, fd = capacity_scaling(UG.nxg, demand='demand', capacity='capacity', weight='weight', lam=params['lam_bar'])
-
-
-                    # m = UG.nxg.number_of_edges()
-                    # n = UG.nxg.number_of_nodes()
-
-                    # mu = np.zeros(m)
-                    # var = np.zeros(m)
-                    # cap = np.zeros(m)
-                    # b = np.zeros(n)
-                    # A = np.zeros((n, m))
-
-                    # rows = []
-                    # cols = []
-                    # values = []
-                    # i = 0
-                    # arc_dict = {}
-                    # for u, v, e in UG.nxg.edges(data=True):
-                    #     mu[i] = e.get('mu', 0)
-                    #     var[i] = e.get('var', 0)
-                    #     cap[i] = e.get('capacity', 0)
-                    #     arc_dict[i] = (u, v)
-                    #     A[u-1, i] = 1
-                    #     A[v-1, i] = -1
-                    #     rows.append(u - 1)
-                    #     cols.append(i)
-                    #     values.append(1)
-                    #     rows.append(v - 1)
-                    #     cols.append(i)
-                    #     values.append(-1)
-                    #     i += 1
-
-                    # A = spmatrix(np.array(values), np.array(rows),
-                    # np.array(cols), (n,m))
-
-                    # subi = []
-                    # subv = []
-                    # for j in range(m):
-                    #     indices = [i for i, x in enumerate(cols) if x == j]
-                    #     r = np.array([rows[i] for i in indices])
-                    #     v = np.array([values[i] for i in indices])
-                    #     subi.append(r)
-                    #     subv.append(v)
-
-                    # rowsG = np.arange(2*m)
-                    # colsG = np.concatenate((np.arange(m), np.arange(m)), axis=0)
-                    # valsG = np.concatenate((-1*np.ones(m), np.ones(m)), axis=0)
-                    # G = spmatrix(valsG,rowsG,colsG,(2*m,m))
-
-                    # q = matrix(np.array(mu))
-                    # var = np.array(var)
-                    # P = spmatrix(2*var, np.arange(m), np.arange(m), (m,m))
-                    # cap = np.array(cap)
-                    # h = np.concatenate((np.zeros(m), cap), axis=0)
-                    # # hh = spmatrix(cap, np.arange(m, 2*m), np.zeros(m), (2*m, 1))
-                    # h = matrix(h)
-
-                    # i = 0
-                    # for node, dat in UG.nxg.nodes(data=True):
-                    #     b[i] = dat['demand']
-                    #     i += 1
-                    # bb = b
-                    # b = matrix(np.array(bb))
-                    # sol=solvers.qp(P, q, G, h, A, b, kktsolver = 'mosek')
-                    # pdb.set_trace()
-
-                    # import sys, os, mosek
-                    # Since the actual value of Infinity is ignored, we define it solely # for symbolic purposes:
-                    # inf = 0.0
-                    # Define a stream printer to grab output from MOSEK
-                    # def streamprinter(text):
-                    #     sys.stdout.write(text)
-                    #     sys.stdout.flush()
-                    # def main():
-                    # # Open MOSEK and create an environment and task # Make a MOSEK environment
-                    #     with mosek.Env() as env:
-                    #             # Attach a printer to the environment
-                    # env.set_Stream(mosek.streamtype.log, streamprinter)
-
-                    #         with env.Task() as task:
-                    #             task.set_Stream(mosek.streamtype.log, streamprinter) # Set up and input bounds and linear coefficients bkc = [mosek.boundkey.lo]
-                    #             bkc = [mosek.boundkey.lo]
-                    #             blc = bb
-                    #             buc = [inf]
-                    #             numvar = m
-                    #             bkx = [mosek.boundkey.lo] * numvar
-                    #             blx = [0.0] * numvar
-                    #             bux = cap
-
-                    #             numvar = len(bkx)
-                    #             numcon = len(bkc)
-                    #             # Append 'numcon' empty constraints.
-                    #             # The constraints will initially have no bounds.
-                    #             task.appendcons(numcon)
-                    #             # Append 'numvar' variables.
-                    #             # The variables will initially be fixed at zero (x=0).
-                    #             task.appendvars(numvar)
-
-                    #             for j in range(numvar):
-                    #             # Set the linear term c_j in the objective.
-                    #                 task.putcj(j, mu[j])
-                    #             # Set the bounds on variable j
-                    #             # blx[j] <= x_j <= bux[j]
-                    # task.putvarbound(j, bkx[j], blx[j], bux[j])
-
-                    #                 try:
-                    #                     indices = [i for i, x in enumerate(cols) if x == j]
-                    #                     r = np.array([rows[i] for i in indices])
-                    # v = np.array([values[i] for i in indices])
-
-                    #                     task.putacol(j,r,v)
-                    #                 except:
-                    #                     pdb.set_trace()
-
-                    #             for i in range(numcon):
-                    #                 task.putconbound(i, bkc[i], blc[i], buc[i])
-                    #                 # Set up and input quadratic objective
-                    #             qsubi = np.arange(m)
-                    #             qsubj = np.arange(m)
-                    #             qval = 2*var
-                    #             task.putqobj(qsubi, qsubj, qval)
-                    #             # Input the objective sense (minimize/maximize)
-                    #             task.putobjsense(mosek.objsense.minimize)
-                    #             # Optimize
-                    #             pdb.set_trace()
-                    #             task.optimize()
-                    #             # Print a summary containing information
-                    #             # about the solution for debugging purposes task.solutionsummary(mosek.streamtype.msg)
-                    #             prosta = task.getprosta(mosek.soltype.itr)
-                    #             solsta = task.getsolsta(mosek.soltype.itr)
-                    #             xx = [0.] * numvar
-                    #             task.getxx(mosek.soltype.itr,xx)
-                    #             if solsta == mosek.solsta.optimal:
-                    #                 print("Optimal solution: %s" % xx)
-                    #             elif solsta == mosek.solsta.dual_infeas_cer:
-                    #                 print("Primal or dual infeasibility.\n")
-                    #             elif solsta == mosek.solsta.prim_infeas_cer:
-                    #                 print("Primal or dual infeasibility.\n")
-                    #             elif mosek.solsta.unknown:
-                    #                 print("Unknown solution status")
-                    #             else:
-                    #                 print("Other solution status")
-
-                    # # call the main function
-                    # try:
-                    #     main()
-                    # except mosek.MosekException as e:
-                    #     print("ERROR: %s" % str(e.errno))
-                    #     if e.msg is not None:
-                    #         import traceback
-                    #         traceback.print_exc()
-                    #         print("\t%s" % e.msg)
-                    #     sys.exit(1)
-                    # except:
-                    #     import traceback
-                    #     traceback.print_exc()
-                    #     sys.exit(1)
-
-                    # pdb.set_trace()
-
-
-                    # varcost = None
-                    # decoyG = copy.deepcopy(UG)
-                    # decoyG.set_lambda(lam=0.1)
-                    # decoyR = copy.deepcopy(UR)
-                    # nx.set_edge_attributes(decoyG.nxg, 0, 'mu')
-                    # discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-                    #     decoyG, decoyR, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-3, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                    # del decoyG
-                    # del decoyR
-                    # lam_high = (lamBar / scale) / (2 * np.sqrt(varcost))
-
-                    # varhigh,d = mosek_solve_lin(**params)
-                    # print('elapsed linear: ', d, varhigh)
-                    # varcost = None
-                    # decoyG2 = copy.deepcopy(UG)
-                    # decoyG2.set_lambda(lam=0.7)
-                    # decoyR2 = copy.deepcopy(UR)
-
-                    # discount, nmcc_time2, scc_time, varhigh = solve_mcf_sa(
-                    #     decoyG2, decoyR2, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-7, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-
-                    # algo_obj = (0.7 * decoyG2.var_cost() + decoyG2.mu_cost())
-                    # print(algo_obj)
-
-                    # c, flow = capacity_scaling(UG.nxg, weight='mu', lam=0.7)
-                    # feasible_flow = {}
-                    # for i in UG.nxg.nodes():
-                    #     for j in flow[i].keys():
-                    #         if j != 't':
-                    #             # if abs(round(flow[i][j],4) - flow[i][j]) <= 1e-10:
-                    #             #     flow[i][j] = round(flow[i][j],4)
-                    #             feasible_flow[i, j] = flow[i][j]
-
-                    # UG.set_flow_attributes(feasible_flow)
-                    # algo_obj = (0.7 * UG.var_cost() + UG.mu_cost())
-                    # print('cap scaling: ', algo_obj)
-
-                    # print('time and cost: ', nmcc_time2, varhigh)
-                    #############
-
-                    # decoyG2 = copy.deepcopy(UG)
-                    # decoyG2.set_lambda(lam=0.1)
-                    # decoyR2 = copy.deepcopy(UR)
-                    # c,d = capacity_scaling(decoyG2.nxg, weight='mu')
-                    # varcost = None
-                    # m = UG.nxg.number_of_edges()
-                    # orig = nx.get_edge_attributes(decoyG2.nxg,'mu')
-                    # nx.set_edge_attributes(decoyG2.nxg, 0, 'var')
-                    # discount, nmcc_time, scc_time, varcost = solve_mcf_sa(
-                    #     decoyG2, decoyR2, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-2, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                    # nx.set_edge_attributes(decoyG2.nxg, orig, 'mu')
-
-                    # varcost_h = m * (params['var_top']
-                    #              * params['d_top'] * params['d_top'])
-                    # lam_low = (lamBar / scale) / (2 * np.sqrt(varcost_h))
-
-                    UG = create_random_graph(**params)
-                    save(UG, 'graph' + save_extension, n)
-                    params['vartop'] = var_top
-                    params['G'] = UG
-
-                    res_time = time.time()
-                    UR = UG.build_res_network()
-                    res_time = time.time() - res_time
-                    res_time = 0
-                    params['R'] = None
-
-                    try:
-                        cvx_mosek_obj, cvx_elapsed, mosek_overhead, x_msk, mucost, varcost = cplex_solve(
-                            **params)
-                        print('mosek done in: ', cvx_elapsed)
-                        print('mosek obj: ', cvx_mosek_obj)
-                    except:
-                        continue
-
-                    # continue
-                    # cvx_elapsed=5
-                    # cvx_mosek_obj=5
-                    # mosek_overhead=5
-                    # cvx_mosek_obj = 5
-                    # cvx_elapsed = 5
-                        # if lamBar ==0:
-                        #     varcost = None
-
-
-                        #     discount, nmcc_time2, scc_time, varhigh = solve_mcf_sa_lin(
-                        #         UG, UR, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-6, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                        #     mucost = UG.mu_cost() 
-                        #     varcost = np.sqrt(UG.var_cost())
-                        #     print('mu and var: ', mucost, varcost)
-                        #     save(mucost, 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-                        #     save(varcost, 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-
-                        #     break
-                            
-                        # else:
-                        #     varcost = None
-                        #     decoyG2 = copy.deepcopy(UG)
-                        #     decoyR2 = copy.deepcopy(UR)
-
-                        #     discount, nmcc_time2, scc_time, varhigh = solve_mcf_sa_lin(
-                        #         decoyG2, decoyR2, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-4, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                        #     del decoyG2
-                        #     del decoyR2
-                        #     del UR
-                        #     lam_low = (lamBar / scale) / (2.0 * np.sqrt(varhigh))
-                        #     lam_high = (lamBar/scale)/2.0
-                        #     lam = (lam_high + lam_low) / 2
-
-                        #     print('lamhigh: ', lam_high)
-                        #     print('lamlow: ', lam_low)
-                        #     print('addtime: ', res_time + nmcc_time2)
-                        #     params['start_varcost'] = varcost
-                        #     params['add_time'] = res_time + nmcc_time2
-                        #     params['lam_high'] = lam_high
-                        #     params['lam_low'] = lam_low
-                        #     params['startlam'] = lam
-
-                        #     params['start_varcost_bs'] = varcost
-                        #     params['add_time_bs'] = res_time + nmcc_time2
-                        #     params['lam_high_bs'] = lam_high
-                        #     params['startlam_bs'] = lam
-                        #     params['max_iters'] = None
-
-                        #     bs_obj, bs_iters, bs_subproblem_times, times_bs, bs_objs, bs_lams, x_bs,mucost, varcost = bisect_solve_exp(
-                        #         **params)
-                           
-                        #     print('mu and var: ', mucost, varcost)
-                        #     save(mucost, 'mu_cost_' + lamstr + '_' + save_extension , n, experiment_name)
-                        #     save(varcost, 'var_cost_' + lamstr + '_' + save_extension, n, experiment_name)
-                        #     break
-
-
-                    varcost = None
-                    decoyG2 = copy.deepcopy(UG)
-                    decoyR2 = copy.deepcopy(UR)
-
-                    discount, nmcc_time2, scc_time, varhigh = solve_mcf_sa_lin(
-                        decoyG2, decoyR2, varcost, fully=True, tol=params['subproblem_tol'], lamsearch=False, nfullytol=1e-4, vartop=params['var_top'], mutop=params['mu_top'], difftol=1e-2)
-                    del decoyG2
-                    del decoyR2
-                    del UR
-                    lam_low = (lamBar / scale) / (2.0 * np.sqrt(varhigh))
-                    # nmcc_time2 = 0
-                    # lam_low=0
-                    lam_high = (lamBar/scale)/2.0
-                    lam = (lam_high + lam_low) / 2
-
-                    print('lamhigh: ', lam_high)
-                    print('lamlow: ', lam_low)
-                    print('addtime: ', res_time + nmcc_time2)
-                    params['start_varcost'] = None
-                    params['add_time'] = res_time + nmcc_time2
-                    params['lam_high'] = lam_high
-                    params['lam_low'] = lam_low
-                    params['startlam'] = lam
-
-                    params['start_varcost_bs'] = None
-                    params['add_time_bs'] = res_time + nmcc_time2
-                    params['lam_high_bs'] = lam_high
-                    params['startlam_bs'] = lam
-                    params['max_iters'] = None
-
-
-
-                    if fix_bs:
-                        bs_obj, bs_iters, bs_subproblem_times, times_bs, bs_objs, bs_lams, x_bs = bisect_solve(
-                            **params)
-                        save(times_bs, 'times_bs' +
-                             save_extension, n, experiment_name)
-                        save(bs_subproblem_times, 'bs_subproblem_times' +
-                             save_extension, n, experiment_name)
-                        save(bs_objs, 'bs_objs' +
-                             save_extension, n, experiment_name)
-                        save(bs_lams, 'bs_lams' +
-                             save_extension, n, experiment_name)
-
-                        print('bs done in: ', times_bs[-1])
-                        print('bs obj: ', bs_obj)
-                        # x_msk = np.array(list(x_msk.values()))
-                        # x_bs = np.array(list(x_bs.values()))
-                        pdb.set_trace()
-                        print('max indiv difference: ', max(abs(x_msk - x_bs)))
-                        max_ind = np.argmax(abs(x_msk - x_bs))
-                        print('max diff corresponding value for msk {}, for bs {}'.format(
-                            x_msk[max_ind], x_bs[max_ind]))
-                    else:
-
-                 
-
-
-                        params['way'] = 'oldformul'
-                        nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                            **params)
-                        print('nr done in: ', times_nr[-1])
-                        print('nr obj: ', nr_obj)
-
-                        params['way'] = 'newformul'
-                        nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                            **params)
-                        print('nr done in: ', times_nr[-1])
-                        print('nr obj: ', nr_obj)
-                        
-                        params['way'] = 'newxicost'
-                        nr_obj, nr_iters, nr_subproblem_times, times_nr, nr_objs, nr_lams = NR_solve(
-                            **params)
-                        print('nr done in: ', times_nr[-1])
-                        print('nr obj: ', nr_obj)
-
-
-                        bs_obj, bs_iters, bs_subproblem_times, times_bs, bs_objs, bs_lams, x_bs = bisect_solve(
-                            **params)
-                        print('bs done in: ', times_bs[-1])
-                        print('bs obj: ', bs_obj)
-
-                        alg3_obj, alg3_iters, alg3_subproblem_times,  times_alg3, alg3_objs, alg3_lams = alg3(
-                            **params)
-                        print('alg3 done in: ', times_alg3[-1])
-                        print('alg3 obj: ', alg3_obj)
-
-                        print('================||||||||=================')
-                        save(cvx_mosek_obj, 'cvx_mosek_obj' +
-                             save_extension, n, experiment_name)
-                        save(mosek_overhead, 'mosek_overhead_time' +
-                             save_extension, n, experiment_name)
-
-                        save(times_bs, 'times_bs' +
-                             save_extension, n, experiment_name)
-                        save(bs_subproblem_times, 'bs_subproblem_times' +
-                             save_extension, n, experiment_name)
-                        save(bs_objs, 'bs_objs' +
-                             save_extension, n, experiment_name)
-                        save(bs_lams, 'bs_lams' +
-                             save_extension, n, experiment_name)
-
-                        save(times_nr, 'times_nr' +
-                             save_extension, n, experiment_name)
-                        save(nr_subproblem_times, 'nr_subproblem_times' +
-                             save_extension, n, experiment_name)
-                        save(nr_objs, 'nr_objs' +
-                             save_extension, n, experiment_name)
-                        save(nr_lams, 'nr_lams' +
-                             save_extension, n, experiment_name)
-
-                        save(times_alg3, 'times_alg3' +
-                             save_extension, n, experiment_name)
-                        save(alg3_subproblem_times, 'alg3_subproblem_times' +
-                             save_extension, n, experiment_name)
-                        save(alg3_objs, 'alg3_objs' +
-                             save_extension, n, experiment_name)
-                        save(alg3_lams, 'alg3_lams' +
-                             save_extension, n, experiment_name)
-                        print('node, lambda_bar, mu, var, arcno, seed: ',
-                                n, lamBar, mu_top, var_top, narcs, seeds[i])
-
-                        print(tabulate([['NR', nr_obj, times_nr[-1], nr_iters], ['ALG3', alg3_obj, times_alg3[-1], alg3_iters], ['BS', bs_obj, times_bs[-1], bs_iters], [
-                            'CVX', cvx_mosek_obj, cvx_elapsed, 1]], headers=['Method', 'Obj_Val', 'Solve_Time', 'Iterations']))
-
-
-# num_nodes = [250]
-# for n in num_nodes:
-#     experiment_name = 'varying_lams'
-#     num_nodes = [n]
-#     lams = np.linspace(0, 5, num=50)
-#     # lams = [0.1, 1, 10, 100]
-#     mus = [50]
-#     variances = [50]
-#     d_tops = [1]
-#     run_experiment(num_nodes, lams, mus, variances, d_tops, 
-#                    experiment_name, multi_arcs=False, test4dense=False, fix_bs=False, start_range=1, repeat=2)
-
-# pdb.set_trace()
-# num_nodes = [250]
-# for n in num_nodes:
-#     experiment_name = 'varying_lams'
-#     num_nodes = [n]
-#     lams = np.linspace(0, 5, num=50)
-#     # lams = [0.1, 1, 10, 100]
-#     mus = [50]
-#     variances = [50]
-#     d_tops = [1]
-#     run_experiment(num_nodes, lams, mus, variances, d_tops, 
-#                    experiment_name, multi_arcs=False, test4dense=True, fix_bs=False, start_range=1)
-
-# pdb.set_trace()
-
-
-num_nodes = [12]
-for n in num_nodes:
-    experiment_name = 'performance'
-    num_nodes = [n]
-    # lams = np.linspace(0, 5, num=50)
-    lams = [0.1, 5]
-    mus = [50]
-    variances = [50]
-    d_tops = [10]
-    pdb.set_trace()
-    run_experiment(num_nodes, lams, mus, variances, d_tops, 
-                   experiment_name, multi_arcs=False, test4dense=False, fix_bs=False, repeat=1)
-
-pdb.set_trace()
-
-
-num_nodes = [10000]
-for n in num_nodes:
-    experiment_name = 'performance'
-    num_nodes = [n]
-    lams = [0.7]
-    mus = [50]
-    d_tops = [10]
-    variances = [20]
-    run_experiment(num_nodes, lams, mus, variances, d_tops,
-                   experiment_name, multi_arcs=False, fix_bs=False, fixmsk=False, repeat=10)
-
-
-# num_nodes = [25000]
-# for n in num_nodes:
-#     experiment_name = 'network_density'
-#     num_nodes = [n]
-#     lams = [0.7]
-#     mus = [50]
-#     d_tops = [1]
-#     variances = [20]
-#     run_experiment(num_nodes, lams, mus, variances, d_tops,
-#                    experiment_name, multi_arcs=True, fix_bs=False, repeat=10)
-
-# num_nodes = [5000, 50000]
-# for n in num_nodes:
-#     experiment_name = 'performance'
-#     num_nodes = [n]
-#     lams = [0.7]
-#     mus = [50]
-#     d_tops = [1]
-#     variances = [20]
-#     run_experiment(num_nodes, lams, mus, variances, d_tops,
-#                    experiment_name, multi_arcs=False, fix_bs=False, fixmsk=False, repeat=10)
-
-
-
-
-# num_nodes = [250]
-# for n in num_nodes:
-#     experiment_name = 'varying_lams'
-#     num_nodes = [n]
-#     lams = np.linspace(0, 5, num=50)
-#     # lams = [0.1, 1, 10, 100]
-#     print(lams)
-#     mus = [50]
-#     variances = [50]
-#     d_tops = [1]
-#     run_experiment(num_nodes, lams, mus, variances, d_tops, 
-#                    experiment_name, multi_arcs=False, test4dense=False, fix_bs=False, repeat=1)
-
-
-# num_nodes = [250]
-# for n in num_nodes:
-#     experiment_name = 'varying_lams'
-#     num_nodes = [n]
-#     lams = np.linspace(0, 5, num=50)
-#     # lams = [0.1, 1, 10, 100]
-#     print(lams)
-#     mus = [50]
-#     variances = [50]
-#     d_tops = [1]
-#     run_experiment(num_nodes, lams, mus, variances, d_tops, 
-#                    experiment_name, multi_arcs=False, test4dense=True, fix_bs=False, repeat=1)
 
+def varying_lambda_experiment(networks, lambars, record=True):
+    experiment = 'varying_lambar'
+
+    for network in networks:
+        for lambar in lambars:
+            G = MCF_DiGraph(lambar)
+            G.nxg = nx.DiGraph()
+            print(network, lambar)
+            if network.find('goto') >= 0:
+                generator = 'goto'
+                filename = 'networks/goto/' + network
+
+            else:
+                generator = 'netgen'
+                filename = 'networks/netgen/' + network
+
+            G = load_data(networkFileName=filename, G=G, generator=generator)
+
+            lam_dir = str(lambar).replace('.', '_')
+            run_name = experiment + '/' + generator + \
+                '/' + network[:network.find('.')] + '_' + lam_dir
+
+            solver_weird = False
+
+            status, feasible, solver_obj, solver_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+
+            print('Solver finished in {} seconds, with objective {}'.format(
+                solver_elapsed, solver_obj))
+
+            if solver_infeas > 2:
+                solver_weird = True
+
+            # getting bounds:
+            _, lb_elapsed, soln, _, _ = cvxpy_solve_additive(G, lam=0, lp=True)
+            var_cost = np.multiply(G.var, soln).dot(soln)
+            lam_low = G.lambar / (2.0 * np.sqrt(var_cost))
+            lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+
+            nr_obj, nr_elapsed, _, nr_iter_objs, nr_iter_elapsed, nr_xi_times, nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs = nr_cvxpy(
+                G, lp=False, low=lam_low, high=lam_high, lam_init=lam_low, solver_obj=solver_obj)
+
+            nr_elapsed += lb_elapsed
+
+            print('NR finished in {} seconds, with objective {}'.format(
+                nr_elapsed, nr_obj))
+
+            _, ub_elapsed, soln, _, _ = cvxpy_solve_additive(
+                G, lam=0, lp=False, bound_lam=True, acceptablegap=1e-3, callback=False)
+            var_cost = np.multiply(G.var, soln).dot(soln)
+            lam_high = G.lambar / (2.0 * np.sqrt(var_cost))
+            bs_obj, bs_elapsed, _, bs_iter_objs, bs_iter_elapsed, bs_avg_infeas, bs_lams, bs_fs = bs_cvxpy(
+                G, lp=False, low=lam_low, high=lam_high, solver_obj=solver_obj)
+
+            bs_elapsed += lb_elapsed + ub_elapsed
+            print('BSC finished in {} seconds, with objective {}'.format(
+                bs_elapsed, bs_obj))
+
+            t = PrettyTable(['Method', 'Soln Time',
+                             '# Iters', 'Obj', 'Rel_Gap', 'Infeas'])
+            t.add_row(['CPLEX', round(solver_elapsed, 2), '-',
+                       solver_obj, '-', round(solver_infeas, 3)])
+            t.add_row(['NR', round(nr_elapsed, 2), len(nr_iter_elapsed),
+                       nr_obj, abs(solver_obj - nr_obj) / nr_obj, round(nr_avg_infeas, 3)])
+            t.add_row(['BSC', round(bs_elapsed, 2), len(bs_iter_elapsed), bs_obj, abs(
+                solver_obj - bs_obj) / bs_obj, round(bs_avg_infeas, 3)])
+            print(t)
+
+            if record:
+
+                # solver_iter_objs, solver_iter_elapsed, presolve_time, ordering_time = parse_cplex_log()
+
+                keys = ['network_name', 'solver_status', 'solver_feasible', 'solver_elapsed', 'solver_obj', 'solver_duals', 'solver_primals', 'solver_is_feasible', 'solver_primal_infeas', 'solver_iter_times', 'solver_feasible_dual', 'solver_feasible_primal', 'solver_infeas',
+                        'nr_elapsed', 'nr_iter_elapsed', 'nr_iter_objs', 'nr_obj',
+                        'nr_xi_times', 'nr_var_times', 'mean', 'var', 'nr_avg_infeas', 'nr_lams', 'nr_fs', 'lambar', 'm', 'n',
+                        'elapsed_lower_bound', 'elapsed_upper_bound',
+                        'bs_obj', 'bs_iter_elapsed', 'bs_iter_objs', 'bs_elapsed', 'bs_avg_infeas', 'bs_lams', 'bs_fs']
+
+                values = [network[:network.find('.')], status, feasible, solver_elapsed, solver_obj, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal, solver_infeas,
+                          nr_elapsed, nr_iter_elapsed, nr_iter_objs, nr_obj, nr_xi_times,
+                          nr_var_times, mean, var, nr_avg_infeas, nr_lams, nr_fs, G.lambar, G.m, G.n, lb_elapsed, ub_elapsed,
+                          bs_obj, bs_iter_elapsed, bs_iter_objs, bs_elapsed, bs_avg_infeas, bs_lams, bs_fs]
+
+                run_dict = dict(zip(keys, values))
+
+                save_run(run_name, run_dict)
+                del run_dict
+                del values
+
+
+def base_vs_reliable_expr(networks, lambars):
+
+    experiment = 'base_vs_reliable'
+
+    for network in networks:
+        for lambar in lambars:
+            G = MCF_DiGraph(lambar)
+            G.nxg = nx.DiGraph()
+            print(network)
+
+            if network.find('goto') >= 0:
+                generator = 'goto'
+                filename = 'networks/goto/' + network
+
+            else:
+                generator = 'netgen'
+                filename = 'networks/netgen/' + network
+
+            G = load_data(networkFileName=filename, G=G, generator=generator)
+
+            lam_dir = str(lambar).replace('.', '_')
+
+            run_name = experiment + '/' + generator + \
+                '/' + network[:network.find('.')] + '_' + lam_dir
+
+            solver_weird = False
+            status, feasible, reliable_obj, reliable_elapsed, solver_soln, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+
+            solver_soln = solver_soln[:-1]
+            rel_mean = G.mu.dot(solver_soln)
+            var_cost = np.multiply(G.var, solver_soln).dot(solver_soln)
+            rel_std = np.sqrt(var_cost)
+
+            if solver_infeas > 2:
+                solver_weird = True
+
+            print('reliable_obj is {}'.format(reliable_obj))
+            orig_var = copy.deepcopy(G.var)
+
+            G.var = np.zeros(G.m)
+
+            status, feasible, obj, base_elapsed, base_x, solver_infeas, solver_duals, solver_primals, solver_is_feasible, solver_primal_infeas, solver_iter_times, solver_feasible_dual, solver_feasible_primal = cvxpy_solve(
+                G, cvxpy=cvxpy, fusion=fusion, run_name=run_name)
+            base_x = base_x[:-1]
+            var_cost = np.multiply(orig_var, base_x).dot(base_x)
+            base_obj = G.mu.dot(base_x) + G.lambar * (np.sqrt(var_cost))
+            base_mean = G.mu.dot(base_x)
+            base_std = np.sqrt(var_cost)
+
+            print('base_obj is {}'.format(base_obj))
+
+            t = PrettyTable(
+                ['Approach', 'Objective', 'Rel-Gap', 'Mean', 'Std'])
+            t.add_row(['Reliable', reliable_obj, '-', rel_mean, rel_std])
+            t.add_row(
+                ['Base', base_obj, (base_obj - reliable_obj) / reliable_obj, G.mu.dot(base_x), np.sqrt(var_cost)])
+            print(t)
+
+            keys = ['network_name', 'G', 'base_elapsed', 'base_obj', 'base_mean', 'base_std', 'rel_mean', 'rel_std',
+                    'solver_obj', 'solver_elapsed', 'lambar', 'm', 'n', 'solver_weird']
+
+            values = [network[:network.find('.')], G, base_elapsed, base_obj, base_mean, base_std, rel_mean, rel_std,
+                      reliable_obj, reliable_elapsed, G.lambar, G.m, G.n, solver_weird]
+
+            run_dict = dict(zip(keys, values))
+
+            save_run(run_name, run_dict)
+
+test = False
+if test:
+    small_test_case()
+
+if test:
+    tails = ['a.min']
+    exponents = ['10']
+    types = ['_8_']
+    networks = get_networks(experiment, tails, exponents, types, test=True)
+    lambar = 10
+    graph_family_experiment(networks, lambar, record=False)
+
+cvxpy = False
+fusion = False
+
+# if cvxpy:
+#     import cvxpy as cp
+if fusion:
+    import mosek.fusion as mf
+else:
+    import cplex
+
+
+lambar = 10
+tails = ['e.min']
+exponents = (np.arange(12, 13)).astype(str)
+types = ['_8_']
+experiment = 'graph_families'
+networks = get_networks(experiment, tails, exponents, types)
+graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+
+## Comment out the experiment you want to perform. For networks of node size 2^15, as it takes a long time, we save results after each algorithm finishes.
+
+
+# lambar = 10
+# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+# exponents = (np.arange(12, 15)).astype(str)
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+
+
+# lambar = 10
+# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+# exponents = (np.arange(15, 16)).astype(str)
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
+#                         fusion=fusion, which='cp')
+
+# lambar = 10
+# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+# exponents = (np.arange(15, 16)).astype(str)
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
+#                         fusion=fusion, which='bs')
+
+# lambar = 10
+# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+# exponents = (np.arange(15, 16)).astype(str)
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'graph_families'
+# networks = get_networks(experiment, tails, exponents, types)
+# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
+#                         fusion=fusion, which='nr')
+
+# print('starting base vs reliable experiments')
+# lambars = np.logspace(-1, 3, 200)
+# exponents = ['10']
+# types = ['_8_']
+# tails = ['e.min']
+# experiment = 'base_vs_reliable'
+# networks = get_networks(experiment, tails, exponents, types)
+# base_vs_reliable_expr(networks, lambars)
+
+# print('starting lambar experiments')
+# lambars = [0.01, 10, 1000]
+# tails = ['f.min', 'g.min', 'h.min', 'j.min', 'k.min']
+# exponents = ['12']
+# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+# experiment = 'varying_lambar'
+# networks = get_networks(experiment, tails, exponents, types, lams=lambars)
+# varying_lambda_experiment(networks, lambars)
