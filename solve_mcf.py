@@ -1159,9 +1159,8 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
             bs_lams = data_dic['bs_lams']
             bs_fs = data_dic['bs_fs']
 
-        pdb.set_trace()
-        hybrid_obj, hybrid_elapsed, _, hybrid_iter_objs, hybrid_iter_elapsed = hybrid(
-                G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
+        # hybrid_obj, hybrid_elapsed, _, hybrid_iter_objs, hybrid_iter_elapsed = hybrid(
+        #         G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
 
 
         if cvxpy:
@@ -1396,13 +1395,6 @@ else:
     import cplex
 
 
-lambar = 10
-tails = ['e.min']
-exponents = (np.arange(12, 13)).astype(str)
-types = ['_8_']
-experiment = 'graph_families'
-networks = get_networks(experiment, tails, exponents, types)
-graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
 ## Comment out the experiment you want to perform. For networks of node size 2^15, as it takes a long time, we save results after each algorithm finishes.
 
