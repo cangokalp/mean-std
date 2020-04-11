@@ -11,3 +11,4 @@ saved_runs/
 generators/
 MCF_DiGraph.py
 useful.py
+benchmark_suite/
