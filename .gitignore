@@ -10,3 +10,4 @@ generators/
 MCF_DiGraph.py
 useful.py
 benchmark_suite/
+cplex_log.txt
