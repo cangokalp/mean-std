@@ -9,12 +9,16 @@ from prettytable import PrettyTable
 import caffeine
 from cplex.callbacks import BarrierCallback
 import networkx as nx
+import sys
+import argparse
+import cplex
 
 class MCF_DiGraph:
 
     def __init__(self, lambar=0.7, residual=False):
         self.nxg = nx.DiGraph()
         self.lambar = lambar
+
 
 class TimeLimit_LoggingCallback(BarrierCallback):
 
@@ -770,7 +774,7 @@ def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird
     lam = (high + low) / 2.0
     lam_high = high
     lam_low = low
-    
+
     if lam_init is not None:
         lam = lam_init
 
@@ -801,7 +805,6 @@ def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird
     lam_prev = None
     f_prev = np.inf
 
-
     while not found:
         iters += 1
 
@@ -823,7 +826,7 @@ def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird
         mean.append(cur_mean)
         var.append(var_cost)
 
-        print(obj, time.time() - start, f)  
+        print(obj, time.time() - start, f)
 
         f_prev = f
         if lp:
@@ -831,10 +834,8 @@ def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird
         else:
             f = lam - G.lambar / (2.0 * np.sqrt(var_cost))
 
-
         if iters > 9 or 100 * abs(obj - solver_obj) / min(obj, solver_obj) < 1e-3:
             break
-
 
         # if np.linalg.norm(f_lam) <= np.linalg.norm(f_prev):
 
@@ -843,13 +844,12 @@ def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird
             elapsed_xi, xi, prob_xi, max_infeas = cvxpy_solve_xi(
                 G, x, lam, prob=prob_xi, warm_start=warm_start_xi, lp=lp, iters=iters, cvxpy=cvxpy, acceptablegap=1e-8, callback=callback)
 
-
             xi_cost = np.multiply(G.var, x).dot(xi)
-            f_lam_der = 1.0 + (G.lambar * xi_cost) / (2 * var_cost**(3.0 / 2.0))
+            f_lam_der = 1.0 + (G.lambar * xi_cost) / \
+                (2 * var_cost**(3.0 / 2.0))
 
             lam_prev = lam
             lam = lam - f / f_lam_der
-
 
             lam_high_prev = lam_high
             lam_low_prev = lam_low
@@ -874,7 +874,7 @@ def hybrid(G, low=0, high=1000, prob=None, lp=False, lam_init=None, solver_weird
     elapsed = time.time() - start
 
     return obj, elapsed, x, iter_objs, iter_elapsed
-    
+
 
 #### EXPERIMENTS ####
 
@@ -1160,8 +1160,8 @@ def graph_family_experiment(networks, lambar, record=True, cvxpy=False, fusion=F
             bs_fs = data_dic['bs_fs']
 
         # hybrid_obj, hybrid_elapsed, _, hybrid_iter_objs, hybrid_iter_elapsed = hybrid(
-        #         G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low, cvxpy=cvxpy_alg, solver_obj=solver_obj)
-
+        # G, lp=False, low=lam_low, high=G.lambar/2.0, lam_init=lam_low,
+        # cvxpy=cvxpy_alg, solver_obj=solver_obj)
 
         if cvxpy:
             t = PrettyTable(['Method', 'Soln Time',
@@ -1384,19 +1384,46 @@ if test:
     lambar = 10
     graph_family_experiment(networks, lambar, record=False)
 
-cvxpy = False
-fusion = False
 
-# if cvxpy:
-#     import cvxpy as cp
-if fusion:
-    import mosek.fusion as mf
-else:
-    import cplex
+def main():
+
+    cvxpy = False
+    fusion = False
+
+    # # if cvxpy:
+    # #     import cvxpy as cp
+    # if fusion:
+    #     import mosek.fusion as mf
+    # else:
+    #     import cplex
+
+    parser = argparse.ArgumentParser(description='')
+
+    parser.add_argument('-e', type=str,
+                        help='experiment name')
+    parser.add_argument('-typ', nargs='+',
+                        help='list of network types to run the experiment on')
+    parser.add_argument('-exp', nargs='+',
+                        help='list of # of nodes, 2^k, input list of ks')
+    parser.add_argument('-t', nargs='+',
+                        help='list of instance extensions')
+    parser.add_argument('-l', type=int, nargs='*', default=10,
+                        help='weight parameter of the MSMCF instance')
+
+    args = parser.parse_args()
+    
+    e = args.e
+    t = args.t
+    exp = args.exp
+    typ = args.typ
+    lambar = args.l
+
+    networks = get_networks(e, t, exp, typ)
+    graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
 
-
-## Comment out the experiment you want to perform. For networks of node size 2^15, as it takes a long time, we save results after each algorithm finishes.
+if __name__ == "__main__":
+    main()
 
 
 # lambar = 10
