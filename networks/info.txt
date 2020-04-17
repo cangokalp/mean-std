@@ -1,0 +1,40 @@
+ Nodes are assumed to be numbered 1 to n, arcs are specified
+ by pairs of head and tail nodes.
+
+ Descriptor items:
+
+   c <some text>   - comment line
+
+   p min <nodes> <arcs>  - problem line, 
+
+         appears before any node and arc descriptor line,
+
+     <nodes> - number of nodes 
+     <arcs>  - number of arcs 
+
+   n <id> <flow> - node descriptor line,
+
+          appears before any arc descriptor line,
+
+     <id> - node identification number
+     <flow> - node flow value
+
+   a <v> <w> <low> <cap> <cost> - arc descriptor line,
+
+     <v>    - identification number of tail node
+     <w>    - identification number of head node
+     <low>  - lower bound for <cap>
+     <cap>  - capacity of arc, uncapacitated if <cap> < 0.
+     <cost> - cost of arc
+
+
+netg source:
+http://elib.zib.de/pub/mp-testdata/mincost/netg/index.html
+From paper:
+D. Klingman, A. Napier, and J. Stutz: NETGEN: A program for generating large scale capacitated assignment, transportation, and minimum cost flow networks, Management Science 20 (1974), pp. 814-820, non-standard problems contributed by A. Löbel.
+
+Lemon database - netgen_lemon source:
+http://lime.cs.elte.hu/~kpeter/data/mcf/
+
+All generators source:
+http://archive.dimacs.rutgers.edu/pub/netflow/generators/network/

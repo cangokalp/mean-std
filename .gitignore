@@ -2,8 +2,6 @@ __pycache__/
 gurobi.log
 logs/
 matlab_files/
-networks/
-plots/
 path/
 saved_runs/
 .ipynb_checkpoints/
