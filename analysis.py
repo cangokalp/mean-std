@@ -523,12 +523,14 @@ def graph_lambar_experiments():
 
     experiment = 'varying_lambar'
     bases = ['netgen']
-    tails = ['a','b','c','d','e','f','g','h','j','k']
+    tails = ['a','b','c','d','e']
 
     exponents = np.array(['12'])
-    types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
+    # types = ['_lo_8_', '_8_', '_lo_sr_', '_sr_']
+    types = ['_8_']
 
-    lams = np.array([0.01, 10, 1000])
+
+    lams = np.array([0.01, 1000])
 
 
     # plt.figure(figsize=(16, 8))
@@ -764,10 +766,10 @@ def graph_lambar_experiments():
 
 
 #run analysis to get graphs
-graph_gap_levels()
+# graph_gap_levels()
 graph_lambar_experiments()
-graph_base_vs_reliable()
-graph_comparison()
+# graph_base_vs_reliable()
+# graph_comparison()
 
 
 

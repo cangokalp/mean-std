@@ -86,10 +86,13 @@ def read_metadata(lines, generator='netgen'):
     return metadata
 
 
-def load_data(networkFileName, G, generator='netgen'):
-    np.random.seed(seed=99)
+
+def load_data(networkFileName, G, cov_coef, generator='netgen'):
+    np.random.seed(seed=9)
     try:
-        
+        # if networkFileName.find('_lo_8')>=0:
+            # networkFileName = networkFileName.replace('_lo_8', '_8')
+        # pdb.set_trace()
         with gzip.open(networkFileName + '.gz', 'rt') as networkFile:
 
             fileLines = networkFile.read().splitlines()
@@ -103,6 +106,7 @@ def load_data(networkFileName, G, generator='netgen'):
             max_arc_cost = int(metadata['Maximum arc cost'])
             max_arc_cap = int(metadata['Maximum arc capacity'])
 
+            varphi = np.zeros((m,n))
             var = np.zeros(m)
             mu = np.zeros(m)
             sigma = np.zeros(m)
@@ -128,7 +132,7 @@ def load_data(networkFileName, G, generator='netgen'):
 
                 if line.find("n") == 0:
                     data = line.split()
-                    b[int(data[1]) - 1] = int(data[2]) 
+                    b[int(data[1]) - 1] = int(data[2])
                     continue
 
                 line = line.strip()
@@ -145,13 +149,16 @@ def load_data(networkFileName, G, generator='netgen'):
                 u = int(data[1])
                 v = int(data[2])
 
-                mu[i] = float(data[5])
+                mu[i] = float(data[5])/100000
 
-                cov_coef = np.random.uniform(0.15, 0.3)
-
-                sigma = mu[i] * cov_coef
+                if len(cov_coef) == 0:
+                    cur_coef = np.random.uniform(0.15, 0.3)
+                else:
+                    cur_coef = cov_coef[i]
+                
+                sigma = mu[i] * cur_coef
                 var[i] = sigma**2
-                cap[i] = float(data[4]) 
+                cap[i] = float(data[4])
                 arc_dict[i] = (u, v)
 
                 rows.append(u - 1)
@@ -161,6 +168,12 @@ def load_data(networkFileName, G, generator='netgen'):
                 cols.append(i)
                 values.append(-1.0)
 
+                # if u-1 != 0:
+                varphi[i,u-1] = 1.0
+                # if v-1 != 0:
+                varphi[i,v-1] = -1.0
+
+
                 G.nxg.add_edge(u, v, capacity=cap[i], mu=mu[i], var=var[i])
                 i += 1
 
@@ -169,6 +182,7 @@ def load_data(networkFileName, G, generator='netgen'):
         G.var = var
         G.cap = cap
         G.A = scipy.sparse.csc_matrix((values, (rows, cols)))       
+        G.varphi = varphi
         G.b = b
         G.n = n
         G.m = m

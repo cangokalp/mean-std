@@ -11,3 +11,8 @@ MCF_DiGraph.py
 useful.py
 benchmark_suite/
 cplex_log.txt
+logging/
+networks/
+saved_runs/
+plots_paper/
+__pycache__/

@@ -27,4 +27,8 @@ python solve_mcf.py -e graph_families -typ _sr_ -exp 12 13 -t a.min b.min
 This will run graph_family experiments on _sr_ network families for node sizes 2^12 and 2^13 on problem instances a and b
 
 
+TODO: 
+Provide dependency list - yaml file and instructions
+Instructions on how to run analysis.py
+
 
