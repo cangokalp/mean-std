@@ -16,3 +16,5 @@ networks/
 saved_runs/
 plots_paper/
 __pycache__/
+graph_families_cplx/
+graph_families_paper/

@@ -6,7 +6,6 @@ import copy
 import cProfile
 import pstats
 from prettytable import PrettyTable
-import caffeine
 from cplex.callbacks import BarrierCallback
 import networkx as nx
 import sys
@@ -1740,17 +1739,6 @@ def base_vs_reliable_expr(networks, lambars):
 
 			save_run(run_name, run_dict)
 
-# test = False
-# if test:
-# 	small_test_case()
-
-# if test:
-# 	tails = ['a.min']
-# 	exponents = ['10'
-# 	types = ['_8_']
-# 	networks = get_networks(experiment, tails, exponents, types, test=True)
-# 	lambar = 10
-# 	graph_family_experiment(networks, lambar, record=False)
 
 
 def main():
@@ -1769,46 +1757,45 @@ def main():
 	# varying_lambda_experiment(networks, lambars, cvxpy=cvxpy, fusion=fusion)
 
 
-	lambar = 10
-	tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
-	exponents = (np.arange(15, 16)).astype(str)
-	types = ['_sr_']
-	experiment = 'graph_families'
-	networks = get_networks(experiment, tails, exponents, types)
-	graph_family_experiment(networks, lambar, cvxpy=cvxpy)
+	# lambar = 10
+	# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+	# exponents = (np.arange(15, 16)).astype(str)
+	# types = ['_sr_']
+	# experiment = 'graph_families'
+	# networks = get_networks(experiment, tails, exponents, types)
+	# graph_family_experiment(networks, lambar, cvxpy=cvxpy)
 
 
-
-	# # if cvxpy:
-	# #     import cvxpy as cp
+	# if cvxpy:
+	#     import cvxpy as cp
 	# if fusion:
 	#     import mosek.fusion as mf
 	# else:
 	#     import cplex
 
-	# parser = argparse.ArgumentParser(description='')
+	parser = argparse.ArgumentParser(description='')
 
-	# parser.add_argument('-e', type=str,
-	# 					help='experiment name')
-	# parser.add_argument('-typ', nargs='+',
-	# 					help='list of network types to run the experiment on')
-	# parser.add_argument('-exp', nargs='+',
-	# 					help='list of # of nodes, 2^k, input list of ks')
-	# parser.add_argument('-t', nargs='+',
-	# 					help='list of instance extensions')
-	# parser.add_argument('-l', type=int, nargs='*', default=10,
-	# 					help='weight parameter of the MSMCF instance')
+	parser.add_argument('-e', type=str,
+						help='experiment name', default='graph_families')
+	parser.add_argument('-typ', nargs='+',
+						help='list of network types to run the experiment on')
+	parser.add_argument('-exp', nargs='+',
+						help='list of # of nodes, 2^k, input list of ks')
+	parser.add_argument('-t', nargs='+',
+						help='list of instance extensions')
+	parser.add_argument('-l', type=int, nargs='*', default=10,
+						help='weight parameter of the MSMCF instance')
 
-	# args = parser.parse_args()
+	args = parser.parse_args()
 	
-	# e = args.e
-	# t = args.t
-	# exp = args.exp
-	# typ = args.typ
-	# lambar = args.l
+	e = args.e
+	t = args.t
+	exp = args.exp
+	typ = args.typ
+	lambar = args.l
 
-	# networks = get_networks(e, t, exp, typ)
-	# graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
+	networks = get_networks(e, t, exp, typ)
+	graph_family_experiment(networks, lambar, cvxpy=cvxpy, fusion=fusion)
 
 
 if __name__ == "__main__":
@@ -1884,38 +1871,38 @@ if __name__ == "__main__":
 	# graph_family_experiment(networks, lambar, cvxpy=cvxpy, which='nr')
 
 
-# lambar = 10
-# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
-# exponents = (np.arange(15, 16)).astype(str)
-# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
-# experiment = 'graph_families'
-# networks = get_networks(experiment, tails, exponents, types)
-# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
-#                         fusion=fusion, which='cp')
+	# lambar = 10
+	# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+	# exponents = (np.arange(15, 16)).astype(str)
+	# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+	# experiment = 'graph_families'
+	# networks = get_networks(experiment, tails, exponents, types)
+	# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
+	#                         fusion=fusion, which='cp')
 
-# lambar = 10
-# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
-# exponents = (np.arange(15, 16)).astype(str)
-# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
-# experiment = 'graph_families'
-# networks = get_networks(experiment, tails, exponents, types)
-# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
-#                         fusion=fusion, which='bs')
+	# lambar = 10
+	# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+	# exponents = (np.arange(15, 16)).astype(str)
+	# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+	# experiment = 'graph_families'
+	# networks = get_networks(experiment, tails, exponents, types)
+	# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
+	#                         fusion=fusion, which='bs')
 
-# lambar = 10
-# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
-# exponents = (np.arange(15, 16)).astype(str)
-# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
-# experiment = 'graph_families'
-# networks = get_networks(experiment, tails, exponents, types)
-# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
-#                         fusion=fusion, which='nr')
+	# lambar = 10
+	# tails = ['e.min', 'd.min', 'c.min', 'b.min', 'a.min']
+	# exponents = (np.arange(15, 16)).astype(str)
+	# types = ['_sr_', '_lo_8_', '_lo_sr_', '_8_']
+	# experiment = 'graph_families'
+	# networks = get_networks(experiment, tails, exponents, types)
+	# graph_family_experiment(networks, lambar, cvxpy=cvxpy,
+	#                         fusion=fusion, which='nr')
 
-# print('starting base vs reliable experiments')
-# lambars = np.logspace(-1, 3, 200)
-# exponents = ['10']
-# types = ['_8_']
-# tails = ['e.min']
-# experiment = 'base_vs_reliable'
-# networks = get_networks(experiment, tails, exponents, types)
-# base_vs_reliable_expr(networks, lambars)
+	# print('starting base vs reliable experiments')
+	# lambars = np.logspace(-1, 3, 200)
+	# exponents = ['10']
+	# types = ['_8_']
+	# tails = ['e.min']
+	# experiment = 'base_vs_reliable'
+	# networks = get_networks(experiment, tails, exponents, types)
+	# base_vs_reliable_expr(networks, lambars)

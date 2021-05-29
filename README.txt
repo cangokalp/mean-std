@@ -1,16 +1,14 @@
 This repo consists of implementation of the proposed methods in "Mean-Standard Deviation Model For Minimum Cost Flow Problem" paper.
 
-As of now, the implementation is rather not clean. It is a work in progress to clean/comment the code and also include dependencies, use instructions within this repo.
-
 ------
 
-Networks used in this project can be found under the networks folder. These networks are downloaded from;
+Networks used in this project can be found in the following repository - we use the benchmark suite NETGEN;
 
 http://lime.cs.elte.hu/~kpeter/data/mcf/
 
 ------
 
-usage: solve_mcf.py [-h] [-e E] [-typ TYP [TYP ...]] [-exp EXP [EXP ...]]
+usage: python solve_mcf.py [-e E] [-typ TYP [TYP ...]] [-exp EXP [EXP ...]]
                     [-t T [T ...]] [-l [L [L ...]]]
 
 optional arguments:
@@ -26,9 +24,7 @@ python solve_mcf.py -e graph_families -typ _sr_ -exp 12 13 -t a.min b.min
 
 This will run graph_family experiments on _sr_ network families for node sizes 2^12 and 2^13 on problem instances a and b
 
+NOTE:
 
-TODO: 
-Provide dependency list - yaml file and instructions
-Instructions on how to run analysis.py
-
-
+Note that the subproblems are solved using cplex, you would need to install cplex first. One can also 
+change the solver option to another free solver in the code and solve using that.
