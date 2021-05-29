@@ -26,5 +26,4 @@ This will run graph_family experiments on _sr_ network families for node sizes 2
 
 NOTE:
 
-Note that the subproblems are solved using cplex, you would need to install cplex first. One can also 
-change the solver option to another free solver in the code and solve using that.
+Note that the subproblems are solved using cplex, you would need to install cplex first. One can also change the solver option to another free solver in the code and solve using that.
